@@ -19,14 +19,12 @@ static class Program{
             (var x 5)
             (++ x)
             (Print x)
-            (PrintString ""hello world"")
-            (PrintString ""BAAAAAAA"")
+            (PrintString ""REFACTOR HAS WORKED!!!!!!!!!!"")
             (PrintString (Test))
             (Print (GetNumber))
         )
         ";
-        var il = Lisp2IL.Compile(code);
-        Console.WriteLine(il);
+        var il = SemanticAnalysis.Analyze(code);
         WasmEmitter.EmitAndRunWasm(il, "Main");
     }
 }

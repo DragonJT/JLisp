@@ -1,94 +1,145 @@
+enum ILOpcode{
+    CreateLocal, 
+    I32Const, StringConst, I32Store8, I32Store, GetLocal, SetLocal, I32Add, I32Sub, I32Mul, I32DivS, Ret, Call
+}
+
+class ILInstruction(ILOpcode opcode, object? value = null){
+    public ILOpcode opcode = opcode;
+    public object? value = value;
+
+    public string StringValue(){
+        if(value is string str){
+            return str;
+        }
+        throw new Exception("Expecting string: "+value);
+    }
+
+    public int IntValue(){
+        if(value is int i){
+            return i;
+        }
+        throw new Exception("Expecting int: "+value);
+    }
+
+    public override string ToString(){
+        var result = opcode.ToString();
+        if(value!=null){
+            result+=": "+value.ToString();
+        }
+        return result;
+    }
+}
+
+class ILVariable(string type, string name){
+    public string type = type;
+    public string name = name;
+}
+
+class ILImportFunction(string returnType, string name, ILVariable[] parameters, string javascript){
+    public string returnType = returnType;
+    public string name = name;
+    public ILVariable[] parameters = parameters;
+    public string javascript = javascript;
+}
+
+class ILFunction(string returnType, bool export, string name, ILVariable[] parameters, ILInstruction[] instructions){
+    public string returnType = returnType;
+    public bool export = export;
+    public string name = name;
+    public ILVariable[] parameters = parameters;
+    public ILInstruction[] instructions = instructions;
+
+    public override string ToString(){
+        var result = $"=============== {name} ============\n";
+        foreach(var i in instructions){
+            result+=i.ToString()+"\n";
+        }
+        return result;
+    }
+}
+
+class IL{
+    public List<ILImportFunction> importFunctions = [];
+    public List<ILFunction> functions = [];
+}
 
 static class WasmEmitter{
 
-    class ImportFunction(LispToken returnType, string name, LispToken parameters, string javascript){
-        public LispToken returnType = returnType;
-        public string name = name;
-        public LispToken parameters = parameters;
-        public string javascript = javascript;
-    }
-
-    class Function(LispToken returnType, bool export, string name, LispToken parameters, LispToken[] instructions){
-        public LispToken returnType = returnType;
-        public bool export = export;
-        public string name = name;
-        public LispToken parameters = parameters;
-        public LispToken[] instructions = instructions;
-    }
-
-    static string GetInitFunction(List<Function> functions){
-        string initialInstructions = "";
+    static void CreateInitFunction(IL il){
+        List<ILInstruction> instructions = [];
         var memLocation = 0;
-        foreach(var function in functions){
+        foreach(var function in il.functions){
             foreach(var instruction in function.instructions){
-                var name = instruction.GetName();
-                if(name == "string.const"){
-                    var value = instruction.GetTokens(name.Length)[0].value;
-                    instruction.value = "i32.const "+memLocation;
-                    initialInstructions += $"(i32.const {memLocation}) (i32.const {value.Length}) (i32.store)";
+                if(instruction.opcode == ILOpcode.StringConst){
+                    var value = instruction.StringValue();
+                    instruction.opcode = ILOpcode.I32Const;
+                    instruction.value = memLocation;
+                    instructions.Add(new ILInstruction(ILOpcode.I32Const, memLocation));
+                    instructions.Add(new ILInstruction(ILOpcode.I32Const, value.Length));
+                    instructions.Add(new ILInstruction(ILOpcode.I32Store));
                     memLocation+=4;
                     foreach(var c in value){
-                        initialInstructions += $"(i32.const {memLocation}) (i32.const {(int)c}) (i32.store_8)";
+                        instructions.Add(new ILInstruction(ILOpcode.I32Const, memLocation));
+                        instructions.Add(new ILInstruction(ILOpcode.I32Const, (int)c));
+                        instructions.Add(new ILInstruction(ILOpcode.I32Store8));
                         memLocation++;
                     }
                     memLocation+=4-(memLocation%4);
                 }
             }
         }
-        return initialInstructions;
+        il.functions.Add(new ILFunction("void", true, "__Init__", [], [..instructions]));
     }
 
-    static byte[] GetFunctionWasm(Function function){
+    static byte[] GetFunctionWasm(ILFunction function){
         var localIDs = new Dictionary<string, uint>();
         foreach(var instruction in function.instructions){
-            var name = instruction.GetName();
-            if(name == "create_local"){
-                var localname = instruction.GetTokens(name.Length)[0].value;
+            if(instruction.opcode == ILOpcode.CreateLocal){
+                var localname = instruction.StringValue();
                 var localID = (uint)localIDs.Count;
                 localIDs.Add(localname, localID);
-                instruction.value = "set_local "+localname;
+                instruction.opcode = ILOpcode.SetLocal;
             }
         }
         var localBytes = WasmHelper.Local((uint)localIDs.Count, Valtype.I32);
 
         List<byte> codeBytes = [];
         foreach(var instruction in function.instructions){
-            var name = instruction.GetName();
-            if(name == "i32.const"){
-                var value = int.Parse(instruction.GetTokens(name.Length)[0].value);
-                codeBytes.AddRange([(byte)Opcode.i32_const, .. WasmHelper.SignedLEB128(value)]);
+            var opcode = instruction.opcode;
+            if(opcode == ILOpcode.I32Const){
+                codeBytes.AddRange([(byte)Opcode.i32_const, .. WasmHelper.SignedLEB128(instruction.IntValue())]);
             }
-            else if(name == "i32.store_8"){
+            else if(opcode == ILOpcode.I32Store8){
                 codeBytes.AddRange([(byte)Opcode.i32_store_8, 0, 0]); // align and offset
             }
-            else if(name == "i32.store"){
+            else if(opcode == ILOpcode.I32Store){
                 codeBytes.AddRange([(byte)Opcode.i32_store, 0, 0]); // align and offset
             }
-            else if(name == "get_local"){
-                var localID = localIDs[instruction.GetTokens(name.Length)[0].value];
+            else if(opcode == ILOpcode.GetLocal){
+                var localID = localIDs[instruction.StringValue()];
                 codeBytes.AddRange([(byte)Opcode.get_local, .. WasmHelper.UnsignedLEB128(localID)]);
             }
-            else if(name == "set_local"){
-                var localID = localIDs[instruction.GetTokens(name.Length)[0].value];
+            else if(opcode == ILOpcode.SetLocal){
+                var localID = localIDs[instruction.StringValue()];
                 codeBytes.AddRange([(byte)Opcode.set_local, .. WasmHelper.UnsignedLEB128(localID)]);
             }
-            else if(name == "i32.add"){
+            else if(opcode == ILOpcode.I32Add){
                 codeBytes.Add((byte)Opcode.i32_add);
             }
-            else if(name == "i32.sub"){
+            else if(opcode == ILOpcode.I32Sub){
                 codeBytes.Add((byte)Opcode.i32_sub);
             }
-            else if(name == "i32.mul"){
+            else if(opcode == ILOpcode.I32Mul){
                 codeBytes.Add((byte)Opcode.i32_mul);
             }
-            else if(name == "i32.div_s"){
+            else if(opcode == ILOpcode.I32Mul){
                 codeBytes.Add((byte)Opcode.i32_div_s);
             }
-            else if(name == "ret"){
+            else if(opcode == ILOpcode.Ret){
                 codeBytes.Add((byte)Opcode.ret);
             }
-            else if(name == "call"){
-                var funcID = uint.Parse(instruction.GetTokens(name.Length)[0].value);
+            else if(opcode == ILOpcode.Call){
+                var funcID = (uint)instruction.IntValue();
                 codeBytes.AddRange([(byte)Opcode.call, .. WasmHelper.UnsignedLEB128(funcID)]);
             }
             else{
@@ -99,33 +150,37 @@ static class WasmEmitter{
         return WasmHelper.Vector([.. WasmHelper.UnsignedLEB128(1), .. localBytes ,.. codeBytes]);
     }
 
-    static int GetFunctionID(List<ImportFunction> importFunctions, List<Function> functions, string name){
-         for(var i=0;i<importFunctions.Count;i++){
-            if(importFunctions[i].name == name){
+    static int GetFunctionID(IL il, string name){
+         for(var i=0;i<il.importFunctions.Count;i++){
+            if(il.importFunctions[i].name == name){
                 return i;
             }
         }
-        for(var i=0;i<functions.Count;i++){
-            if(functions[i].name == name){
-                return i+importFunctions.Count;
+        for(var i=0;i<il.functions.Count;i++){
+            if(il.functions[i].name == name){
+                return i+il.importFunctions.Count;
             }
         }
         throw new Exception("Error cannot find function with name: "+name);
     }
 
-    static string GetImportObject(List<ImportFunction> importFunctions){
+    static string GetParameters(ILVariable[] parameters){
+        var code = "";
+        for(var i=0;i<parameters.Length;i++){
+            code+=parameters[i].name;
+            if(i<parameters.Length-1){
+                code+=", ";
+            }
+        }
+        return code;
+    }
+
+    static string GetImportObject(List<ILImportFunction> importFunctions){
         var code = "";
         for(var i=0;i<importFunctions.Count;i++){
             var f = importFunctions[i];
             code+="imports.env."+f.name+"= (";
-            var ptokens = f.parameters.GetTokens();
-            var len = ptokens.Length/2;
-            for(var ip=0;ip<len;ip++){
-                code+=ptokens[ip*2+1].value;
-                if(i<len-1){
-                    code+=", ";
-                }
-            }
+            code+=GetParameters(f.parameters);
             code+=")=>{";
             code+=f.javascript;
             code+="};\n";
@@ -133,8 +188,8 @@ static class WasmEmitter{
         return code;
     }
 
-    static Valtype GetValtype(LispToken type){
-        if(type.value == "int"){
+    static Valtype GetValtype(string type){
+        if(type == "int"){
             return Valtype.I32;
         }
         else{
@@ -142,23 +197,22 @@ static class WasmEmitter{
         }
     }
 
-    static Valtype[] GetReturnValtypes(LispToken type){
-        if(type.value == "void"){
+    static Valtype[] GetReturnValtypes(string type){
+        if(type == "void"){
             return [];
         }
         return [GetValtype(type)];
     }
 
-    static Valtype[] GetValtypes(LispToken parameters){
+    static Valtype[] GetValtypes(ILVariable[] parameters){
         List<Valtype> valtypes = [];
-        var tokens = parameters.GetTokens();
-        for(var i=0;i<tokens.Length;i+=2){
-            valtypes.Add(GetValtype(tokens[i]));
+        for(var i=0;i<parameters.Length;i+=2){
+            valtypes.Add(GetValtype(parameters[i].type));
         }
         return [..valtypes];
     }
     
-    static byte[] GetTypeSignatureBytes(LispToken parameters, LispToken returnType){
+    static byte[] GetTypeSignatureBytes(ILVariable[] parameters, string returnType){
         return [
             WasmHelper.functionType,
             ..WasmHelper.Vector(GetValtypes(parameters).Select(v=>(byte)v).ToArray()),
@@ -166,101 +220,53 @@ static class WasmEmitter{
         ];
     }
 
-    static bool GetBool(LispToken token){
-        if(token.type == LispTokenType.Varname){
-            if(token.value == "t"){
-                return true;
-            }
-            if(token.value == "f"){
-                return false;
-            }
-        }
-        throw new Exception("Expecting t or f: "+token.ToString());
-    }
+    public static void EmitAndRunWasm(IL il, string main){
+        CreateInitFunction(il);
+        var importObject = GetImportObject(il.importFunctions);
 
-    public static void EmitAndRunWasm(string il, string main){
-        var tokens = new LispToken(LispTokenType.Object, il).GetTokens();
-        var functions = new List<Function>();
-        var importFunctions = new List<ImportFunction>();
-        foreach(var t in tokens){
-            var type = t.GetName();
-            if(type == "import"){
-                var fnTokens = t.GetTokens(type.Length);
-                var returnType = fnTokens[0];
-                var name = fnTokens[1].value;
-                var parameters = fnTokens[2];
-                var javascript = fnTokens[3].ToString();
-                importFunctions.Add(new ImportFunction(returnType, name, parameters, javascript));
-            }
-            else if(type == "fn"){
-                var fnTokens = t.GetTokens(type.Length);
-                var export = GetBool(fnTokens[0]);
-                var returnType = fnTokens[1];
-                var name = fnTokens[2].value;
-                var parameters = fnTokens[3];
-                var instructions = fnTokens[4].GetTokens();
-                functions.Add(new Function(returnType, export, name, parameters, instructions));
-            }
-            else{
-                throw new Exception(t.ToString());
-            }
-        }
-
-        var initFunctionBody = GetInitFunction(functions);
-        functions.Add(new Function(
-            new LispToken(LispTokenType.Varname, "void"), 
-            true, 
-            "__Init__", 
-            new LispToken(LispTokenType.Object, ""),
-            new LispToken(LispTokenType.Object, initFunctionBody).GetTokens()));
-
-        var importObject = GetImportObject(importFunctions);
-
-        foreach(var f in functions){
+        foreach(var f in il.functions){
             foreach(var i in f.instructions){
-                var name = i.GetName();
-                if(name == "call"){
-                    var funcID = GetFunctionID(importFunctions, functions, i.GetTokens(name.Length)[0].value);
-                    i.value = "call "+funcID;
+                if(i.opcode == ILOpcode.Call){
+                    i.value = GetFunctionID(il, i.StringValue());
                 }
             }
         }
 
         List<byte[]> codeSection = [];
-        foreach(var f in functions){
+        foreach(var f in il.functions){
             codeSection.Add(GetFunctionWasm(f));
         }
 
         List<byte[]> importSection = [];
-        for(var i=0;i<importFunctions.Count;i++){
+        for(var i=0;i<il.importFunctions.Count;i++){
             importSection.Add([
                 ..WasmHelper.String("env"), 
-                ..WasmHelper.String(importFunctions[i].name),
+                ..WasmHelper.String(il.importFunctions[i].name),
                 (byte)ExportType.Func,
                 ..WasmHelper.UnsignedLEB128((uint)i)]);
         }
         importSection.Add(WasmHelper.MemoryImport);
 
         List<byte[]> typeSection = [];
-        foreach(var f in importFunctions){
+        foreach(var f in il.importFunctions){
             typeSection.Add(GetTypeSignatureBytes(f.parameters, f.returnType));
         }
-        foreach(var f in functions){
+        foreach(var f in il.functions){
             typeSection.Add(GetTypeSignatureBytes(f.parameters, f.returnType));
         }
 
         List<byte[]> funcSection = [];
-        for(var i=0;i<functions.Count;i++){
-            funcSection.Add(WasmHelper.UnsignedLEB128((uint)(i+importFunctions.Count)));
+        for(var i=0;i<il.functions.Count;i++){
+            funcSection.Add(WasmHelper.UnsignedLEB128((uint)(i+il.importFunctions.Count)));
         }
 
         List<byte[]> exportSection = [];
-        for(var i=0;i<functions.Count;i++){
-            if(functions[i].export){
+        for(var i=0;i<il.functions.Count;i++){
+            if(il.functions[i].export){
                 exportSection.Add([
-                    ..WasmHelper.String(functions[i].name), 
+                    ..WasmHelper.String(il.functions[i].name), 
                     (byte)ExportType.Func, 
-                    ..WasmHelper.UnsignedLEB128((uint)(importFunctions.Count+i))]);
+                    ..WasmHelper.UnsignedLEB128((uint)(il.importFunctions.Count+i))]);
             }
         }
 
