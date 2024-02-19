@@ -1,5 +1,5 @@
 enum ILOpcode{
-    CreateLocal, If, End, LT, GT, And, Or, Br, BrIf, Loop, Block, I32Load, I32Load8S, I32Eqz,
+    CreateLocal, If, End, LT, GT, I32And, I32Or, Br, BrIf, Loop, Block, I32Load, I32Load8S, I32Eqz, I32Rem,
     I32Const, StringConst, I32Store8, I32Store, GetLocal, SetLocal, I32Add, I32Sub, I32Mul, I32DivS, Ret, Call
 }
 
@@ -65,34 +65,42 @@ class IL{
 
 static class WasmEmitter{
 
+    static ILInstruction[] CreateStoreInstructions(int memLocation, int value, ILOpcode storeOpcode){
+        return [
+            new ILInstruction(ILOpcode.I32Const, memLocation),
+            new ILInstruction(ILOpcode.I32Const, value),
+            new ILInstruction(storeOpcode)
+        ];
+    }
+
     static void CreateInitFunction(IL il){
         List<ILInstruction> instructions = [];
-        var memLocation = 0;
+        var memLocation = 4;
         foreach(var function in il.functions){
             foreach(var instruction in function.instructions){
                 if(instruction.opcode == ILOpcode.StringConst){
                     var value = instruction.StringValue();
                     instruction.opcode = ILOpcode.I32Const;
                     instruction.value = memLocation;
-                    instructions.Add(new ILInstruction(ILOpcode.I32Const, memLocation));
-                    instructions.Add(new ILInstruction(ILOpcode.I32Const, value.Length));
-                    instructions.Add(new ILInstruction(ILOpcode.I32Store));
+                    instructions.AddRange(CreateStoreInstructions(memLocation, value.Length, ILOpcode.I32Store));
                     memLocation+=4;
                     foreach(var c in value){
-                        instructions.Add(new ILInstruction(ILOpcode.I32Const, memLocation));
-                        instructions.Add(new ILInstruction(ILOpcode.I32Const, (int)c));
-                        instructions.Add(new ILInstruction(ILOpcode.I32Store8));
+                        instructions.AddRange(CreateStoreInstructions(memLocation, c, ILOpcode.I32Store8));
                         memLocation++;
                     }
                     memLocation+=4-(memLocation%4);
                 }
             }
         }
+        instructions.AddRange(CreateStoreInstructions(0, memLocation, ILOpcode.I32Store));
         il.functions.Add(new ILFunction("void", true, "__Init__", [], [..instructions]));
     }
 
     static byte[] GetFunctionWasm(ILFunction function){
         var localIDs = new Dictionary<string, uint>();
+        foreach(var p in function.parameters){
+            localIDs.Add(p.name, (uint)localIDs.Count);
+        }
         foreach(var instruction in function.instructions){
             if(instruction.opcode == ILOpcode.CreateLocal){
                 var localname = instruction.StringValue();
@@ -112,10 +120,10 @@ static class WasmEmitter{
             else if(opcode == ILOpcode.End){
                 codeBytes.Add((byte)Opcode.end);
             }
-            else if(opcode == ILOpcode.And){
+            else if(opcode == ILOpcode.I32And){
                 codeBytes.Add((byte)Opcode.i32_and);
             }
-            else if(opcode == ILOpcode.Or){
+            else if(opcode == ILOpcode.I32Or){
                 codeBytes.Add((byte)Opcode.i32_or);
             }
             else if(opcode == ILOpcode.LT){
@@ -124,8 +132,11 @@ static class WasmEmitter{
             else if(opcode == ILOpcode.GT){
                 codeBytes.Add((byte)Opcode.i32_gt_s);
             }
-             else if(opcode == ILOpcode.I32Eqz){
+            else if(opcode == ILOpcode.I32Eqz){
                 codeBytes.Add((byte)Opcode.i32_eqz);
+            }
+            else if(opcode == ILOpcode.I32Rem){
+                codeBytes.Add((byte)Opcode.i32_rem_s);
             }
             else if(opcode == ILOpcode.Br){
                 codeBytes.AddRange([(byte)Opcode.br, .. WasmHelper.SignedLEB128(instruction.IntValue())]);
@@ -231,31 +242,26 @@ static class WasmEmitter{
         if(type == "int"){
             return Valtype.I32;
         }
+        else if(type == "string"){
+            return Valtype.I32;
+        }
         else{
             throw new Exception("Unexpected type: "+type);
         }
     }
 
-    static Valtype[] GetReturnValtypes(string type){
+    static byte[] GetReturnBytes(string type){
         if(type == "void"){
             return [];
         }
-        return [GetValtype(type)];
+        return [(byte)GetValtype(type)];
     }
 
-    static Valtype[] GetValtypes(ILVariable[] parameters){
-        List<Valtype> valtypes = [];
-        for(var i=0;i<parameters.Length;i+=2){
-            valtypes.Add(GetValtype(parameters[i].type));
-        }
-        return [..valtypes];
-    }
-    
     static byte[] GetTypeSignatureBytes(ILVariable[] parameters, string returnType){
         return [
             WasmHelper.functionType,
-            ..WasmHelper.Vector(GetValtypes(parameters).Select(v=>(byte)v).ToArray()),
-            ..WasmHelper.Vector(GetReturnValtypes(returnType).Select(v=>(byte)v).ToArray())
+            ..WasmHelper.Vector(parameters.Select(p=>(byte)GetValtype(p.type)).ToArray()),
+            ..WasmHelper.Vector(GetReturnBytes(returnType))
         ];
     }
 

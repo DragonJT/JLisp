@@ -1,4 +1,5 @@
 
+
 static class SemanticAnalysis{        
     
     interface ILispNode{}
@@ -148,7 +149,7 @@ static class SemanticAnalysis{
             stackSize++;
         }
         while(stackSize>1){
-            result.Add(new ILInstruction(ILOpcode.And));
+            result.Add(new ILInstruction(ILOpcode.I32And));
             stackSize--;
         }
         return [..result];
@@ -191,6 +192,46 @@ static class SemanticAnalysis{
         throw new Exception("Expecting indexer to be length 3"+indexer.ToString());
     }
 
+    static ILInstruction[] LoadMemoryUsed(){
+        return [new ILInstruction(ILOpcode.I32Const, 0), new ILInstruction(ILOpcode.I32Load)];
+    }
+
+    static ILInstruction[] SetMemToMultipleOf4(){
+        return [
+            new ILInstruction(ILOpcode.I32Const, 0),
+            new ILInstruction(ILOpcode.I32Const, 0),
+            new ILInstruction(ILOpcode.I32Load),
+            new ILInstruction(ILOpcode.I32Const, 4),
+            new ILInstruction(ILOpcode.I32Const, 0),
+            new ILInstruction(ILOpcode.I32Load),
+            new ILInstruction(ILOpcode.I32Const, 4),
+            new ILInstruction(ILOpcode.I32Rem),
+            new ILInstruction(ILOpcode.I32Sub),
+            new ILInstruction(ILOpcode.I32Add),
+            new ILInstruction(ILOpcode.I32Store),
+        ];
+    }
+
+    static ILInstruction[] AnalyzeNew(LispObject @new){
+        if(@new.Length == 3 && @new.GetVarname(1) == "string"){
+            return [
+                ..LoadMemoryUsed(), // return this
+                new ILInstruction(ILOpcode.I32Const, 0),
+                ..LoadMemoryUsed(),
+                ..AnalyzeExpression(@new.value[2]),
+                new ILInstruction(ILOpcode.I32Store),
+                ..LoadMemoryUsed(),
+                ..AnalyzeExpression(@new.value[2]),
+                new ILInstruction(ILOpcode.I32Add),
+                new ILInstruction(ILOpcode.I32Const, 4),
+                new ILInstruction(ILOpcode.I32Add),
+                new ILInstruction(ILOpcode.I32Store),
+                ..SetMemToMultipleOf4(),
+            ];
+        }
+        throw new Exception("Expecting new to be length 3 and type string: "+@new.ToString());
+    }
+
     static ILInstruction[] AnalyzeLength(LispObject length){
         if(length.Length == 2){
             return [
@@ -229,16 +270,25 @@ static class SemanticAnalysis{
                 return AnalyzeOperator2NumsInBoolOut(o, ILOpcode.GT);
             }
             else if(name == "&&"){
-                return AnalyzeOperatorBoolInBoolOut(o, ILOpcode.And);
+                return AnalyzeOperatorBoolInBoolOut(o, ILOpcode.I32And);
             }
             else if(name == "||"){
-                return AnalyzeOperatorBoolInBoolOut(o, ILOpcode.Or);
+                return AnalyzeOperatorBoolInBoolOut(o, ILOpcode.I32Or);
             }
             else if(name == "#"){
                 return AnalyzeIndexer(o);
             }
             else if(name == "Length"){
                 return AnalyzeLength(o);
+            }
+            else if(name == "new"){
+                return AnalyzeNew(o);
+            }
+            else if(name == "MemoryUsed"){
+                if(o.Length == 1){
+                    return LoadMemoryUsed();
+                }
+                throw new Exception("Expecting Memory Used to have 1 length: "+o.ToString());
             }
             return AnalyzeCall(o, name);
         }
@@ -334,6 +384,28 @@ static class SemanticAnalysis{
                     ];
                 }
                 throw new Exception("++ Expecting 2 length: "+objStatement.ToString());
+            }
+            else if(name == "="){
+                if(objStatement.Length == 3){
+                    if(objStatement.value[1] is LispObject assignee && assignee.GetVarname(0) == "#"){
+                        return [
+                            new ILInstruction(ILOpcode.GetLocal, assignee.GetVarname(1)),
+                            ..AnalyzeExpression(assignee.value[2]),
+                            new ILInstruction(ILOpcode.I32Add),
+                            new ILInstruction(ILOpcode.I32Const, 4),
+                            new ILInstruction(ILOpcode.I32Add),
+                            ..AnalyzeExpression(objStatement.value[2]),
+                            new ILInstruction(ILOpcode.I32Store)
+                        ];
+                    }
+                    else if(objStatement.value[1] is LispVarname varname){
+                        return [
+                            ..AnalyzeExpression(objStatement.value[2]),
+                            new ILInstruction(ILOpcode.SetLocal, varname.value),
+                        ];
+                    }
+                }
+                throw new Exception("= Expecting 3 length: "+objStatement.ToString());
             }
             else{
                 return AnalyzeCall(objStatement, name);                

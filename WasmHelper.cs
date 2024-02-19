@@ -19,6 +19,7 @@ enum Opcode
     i32_const = 0x41,
     f32_const = 0x43,
     i32_eqz = 0x45,
+    i32_rem_s = 0x6f,
     i32_eq = 0x46,
     f32_eq = 0x5b,
     f32_lt = 0x5d,
