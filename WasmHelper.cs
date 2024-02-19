@@ -1,3 +1,5 @@
+// https://pengowray.github.io/wasm-ops/
+
 enum Opcode
 {
     block = 0x02,
@@ -12,6 +14,8 @@ enum Opcode
     set_local = 0x21,
     i32_store_8 = 0x3a,
     i32_store = 0x36,
+    i32_load8_s = 0x2c,
+    i32_load = 0x28,
     i32_const = 0x41,
     f32_const = 0x43,
     i32_eqz = 0x45,
@@ -20,6 +24,7 @@ enum Opcode
     f32_lt = 0x5d,
     f32_gt = 0x5e,
     i32_and = 0x71,
+    i32_or = 0x72,
     f32_add = 0x92,
     f32_sub = 0x93,
     f32_mul = 0x94,

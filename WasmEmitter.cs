@@ -1,5 +1,5 @@
 enum ILOpcode{
-    CreateLocal, 
+    CreateLocal, If, End, LT, GT, And, Or, Br, BrIf, Loop, Block, I32Load, I32Load8S, I32Eqz,
     I32Const, StringConst, I32Store8, I32Store, GetLocal, SetLocal, I32Add, I32Sub, I32Mul, I32DivS, Ret, Call
 }
 
@@ -96,17 +96,50 @@ static class WasmEmitter{
         foreach(var instruction in function.instructions){
             if(instruction.opcode == ILOpcode.CreateLocal){
                 var localname = instruction.StringValue();
-                var localID = (uint)localIDs.Count;
-                localIDs.Add(localname, localID);
+                if(!localIDs.ContainsKey(localname)){ //warning multiple variables can have same name
+                    localIDs.Add(localname, (uint)localIDs.Count);
+                }
                 instruction.opcode = ILOpcode.SetLocal;
             }
         }
         var localBytes = WasmHelper.Local((uint)localIDs.Count, Valtype.I32);
-
         List<byte> codeBytes = [];
         foreach(var instruction in function.instructions){
             var opcode = instruction.opcode;
-            if(opcode == ILOpcode.I32Const){
+            if(opcode == ILOpcode.If){
+                codeBytes.AddRange([(byte)Opcode.@if, (byte)Blocktype.@void]);
+            }
+            else if(opcode == ILOpcode.End){
+                codeBytes.Add((byte)Opcode.end);
+            }
+            else if(opcode == ILOpcode.And){
+                codeBytes.Add((byte)Opcode.i32_and);
+            }
+            else if(opcode == ILOpcode.Or){
+                codeBytes.Add((byte)Opcode.i32_or);
+            }
+            else if(opcode == ILOpcode.LT){
+                codeBytes.Add((byte)Opcode.i32_lt_s);
+            }
+            else if(opcode == ILOpcode.GT){
+                codeBytes.Add((byte)Opcode.i32_gt_s);
+            }
+             else if(opcode == ILOpcode.I32Eqz){
+                codeBytes.Add((byte)Opcode.i32_eqz);
+            }
+            else if(opcode == ILOpcode.Br){
+                codeBytes.AddRange([(byte)Opcode.br, .. WasmHelper.SignedLEB128(instruction.IntValue())]);
+            }
+            else if(opcode == ILOpcode.BrIf){
+                codeBytes.AddRange([(byte)Opcode.br_if, .. WasmHelper.SignedLEB128(instruction.IntValue())]);
+            }
+            else if(opcode == ILOpcode.Loop){
+                codeBytes.AddRange([(byte)Opcode.loop, (byte)Blocktype.@void]);
+            }
+            else if(opcode == ILOpcode.Block){
+                codeBytes.AddRange([(byte)Opcode.block, (byte)Blocktype.@void]);
+            }
+            else if(opcode == ILOpcode.I32Const){
                 codeBytes.AddRange([(byte)Opcode.i32_const, .. WasmHelper.SignedLEB128(instruction.IntValue())]);
             }
             else if(opcode == ILOpcode.I32Store8){
@@ -114,6 +147,12 @@ static class WasmEmitter{
             }
             else if(opcode == ILOpcode.I32Store){
                 codeBytes.AddRange([(byte)Opcode.i32_store, 0, 0]); // align and offset
+            }
+            else if(opcode == ILOpcode.I32Load){
+                codeBytes.AddRange([(byte)Opcode.i32_load, 0, 0]);
+            }
+            else if(opcode == ILOpcode.I32Load8S){
+                codeBytes.AddRange([(byte)Opcode.i32_load8_s, 0, 0]);
             }
             else if(opcode == ILOpcode.GetLocal){
                 var localID = localIDs[instruction.StringValue()];
@@ -297,6 +336,10 @@ imports.env = {};
 importObject
 + @"
 imports.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
+
+function GetChar(i){
+    return String.fromCharCode(i);
+}
 
 function GetString(pointer){
     const length = new Int32Array(imports.env.memory.buffer, pointer, 1)[0];

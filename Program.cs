@@ -5,26 +5,22 @@ static class Program{
         var code = @"
         (import void Print (int i) ""console.log(i);"")
 
+        (import void PrintChar (int c) ""console.log(GetChar(c));"")
+
         (import void PrintString (int i) ""console.log(GetString(i));"")
 
-        (int Test () 
-            (ret ""woohoo!"")
-        )
-
-        (int GetNumber ()
-            (ret (+ 4 2))
-        )
-
         (export void Main ()
-            (var x 5)
-            (++ x)
-            (Print x)
-            (PrintString ""REFACTOR HAS WORKED!!!!!!!!!!"")
-            (PrintString (Test))
-            (Print (GetNumber))
+            (var first ""Hello"")
+            (var second ""World"") 
+            (for i 0 (Length first)
+                (PrintChar (# first i))
+            )
+            (for i 0 (Length second)
+                (PrintChar (# second i))
+            )
         )
         ";
         var il = SemanticAnalysis.Analyze(code);
         WasmEmitter.EmitAndRunWasm(il, "Main");
     }
-}
+} 

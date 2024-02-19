@@ -138,6 +138,36 @@ static class SemanticAnalysis{
         return [..result];
     }
 
+    static ILInstruction[] AnalyzeOperator2NumsInBoolOut(LispObject expression, ILOpcode op){
+        List<ILInstruction> result = [];
+        var stackSize = 0;
+        for(var i=1;i<expression.Length-1;i++){
+            result.AddRange(AnalyzeExpression(expression.value[i]));
+            result.AddRange(AnalyzeExpression(expression.value[i+1]));
+            result.Add(new ILInstruction(op));
+            stackSize++;
+        }
+        while(stackSize>1){
+            result.Add(new ILInstruction(ILOpcode.And));
+            stackSize--;
+        }
+        return [..result];
+    }
+
+    static ILInstruction[] AnalyzeOperatorBoolInBoolOut(LispObject expression, ILOpcode op){
+        List<ILInstruction> result = [];
+        var stackSize = 0;
+        for(var i=1;i<expression.Length-1;i++){
+            result.AddRange(AnalyzeExpression(expression.value[i]));
+            stackSize++;
+        }
+        while(stackSize>1){
+            result.Add(new ILInstruction(op));
+            stackSize--;
+        }
+        return [..result];
+    }
+
     static ILInstruction[] AnalyzeCall(LispObject call, string name){
         List<ILInstruction> result = [];
         for(var i=1;i<call.Length;i++){
@@ -145,6 +175,30 @@ static class SemanticAnalysis{
         }
         result.Add(new ILInstruction(ILOpcode.Call, name));
         return [..result];
+    }
+
+    static ILInstruction[] AnalyzeIndexer(LispObject indexer){
+        if(indexer.Length == 3){
+            return [
+                new ILInstruction(ILOpcode.GetLocal, indexer.GetVarname(1)),
+                ..AnalyzeExpression(indexer.value[2]),
+                new ILInstruction(ILOpcode.I32Const, 4),
+                new ILInstruction(ILOpcode.I32Add),
+                new ILInstruction(ILOpcode.I32Add),
+                new ILInstruction(ILOpcode.I32Load8S),
+            ];
+        }
+        throw new Exception("Expecting indexer to be length 3"+indexer.ToString());
+    }
+
+    static ILInstruction[] AnalyzeLength(LispObject length){
+        if(length.Length == 2){
+            return [
+                new ILInstruction(ILOpcode.GetLocal, length.GetVarname(1)),
+                new ILInstruction(ILOpcode.I32Load),
+            ];
+        }
+        throw new Exception("Expecting Length to be length 2"+length.ToString());
     }
 
     static ILInstruction[] AnalyzeExpression(ILispNode expression){
@@ -167,6 +221,24 @@ static class SemanticAnalysis{
             }
             else if(name == "/"){
                 return AnalyzeOperator(o, ILOpcode.I32DivS);
+            }
+            else if(name == "<"){
+                return AnalyzeOperator2NumsInBoolOut(o, ILOpcode.LT);
+            }
+            else if(name == ">"){
+                return AnalyzeOperator2NumsInBoolOut(o, ILOpcode.GT);
+            }
+            else if(name == "&&"){
+                return AnalyzeOperatorBoolInBoolOut(o, ILOpcode.And);
+            }
+            else if(name == "||"){
+                return AnalyzeOperatorBoolInBoolOut(o, ILOpcode.Or);
+            }
+            else if(name == "#"){
+                return AnalyzeIndexer(o);
+            }
+            else if(name == "Length"){
+                return AnalyzeLength(o);
             }
             return AnalyzeCall(o, name);
         }
@@ -196,6 +268,61 @@ static class SemanticAnalysis{
                         new ILInstruction(ILOpcode.CreateLocal, objStatement.GetVarname(1))];
                 }
                 throw new Exception("Expecting var 3 length: "+objStatement.ToString());
+            }
+            else if(name == "if"){
+                if(objStatement.Length > 2){
+                    return [                        
+                        ..AnalyzeExpression(objStatement.value[1]),
+                        new ILInstruction(ILOpcode.If),
+                        ..AnalyzeBody(objStatement.value[2..^0]),
+                        new ILInstruction(ILOpcode.End)
+                    ];
+                }
+                throw new Exception("Expecting if > 2 length: "+objStatement.ToString());
+            }
+            else if(name == "loop"){
+                if(objStatement.Length > 1){
+                    return [
+                        new ILInstruction(ILOpcode.Block),
+                        new ILInstruction(ILOpcode.Loop),
+                        ..AnalyzeBody(objStatement.value[1..^0]),
+                        new ILInstruction(ILOpcode.Br, 0),
+                        new ILInstruction(ILOpcode.End),
+                        new ILInstruction(ILOpcode.End)
+                    ];
+                }
+                throw new Exception("Expecting loop > 1 length: "+objStatement.ToString());
+            }
+            else if(name == "for"){
+                if(objStatement.Length>4){
+                    var iterator = objStatement.GetVarname(1);
+                    return [
+                        ..AnalyzeExpression(objStatement.value[2]),
+                        new ILInstruction(ILOpcode.CreateLocal, iterator),
+                        new ILInstruction(ILOpcode.Block),
+                        new ILInstruction(ILOpcode.Loop),
+                        new ILInstruction(ILOpcode.GetLocal, iterator),
+                        ..AnalyzeExpression(objStatement.value[3]),
+                        new ILInstruction(ILOpcode.LT),
+                        new ILInstruction(ILOpcode.I32Eqz),
+                        new ILInstruction(ILOpcode.BrIf, 1),
+                        ..AnalyzeBody(objStatement.value[4..^0]),
+                        new ILInstruction(ILOpcode.GetLocal, iterator),
+                        new ILInstruction(ILOpcode.I32Const, 1),
+                        new ILInstruction(ILOpcode.I32Add),
+                        new ILInstruction(ILOpcode.SetLocal, iterator),
+                        new ILInstruction(ILOpcode.Br, 0),
+                        new ILInstruction(ILOpcode.End),
+                        new ILInstruction(ILOpcode.End),
+                    ];
+                }
+                throw new Exception("Expecting for > 4 length: "+objStatement.ToString());
+            }
+            else if(name == "break"){
+                if(objStatement.Length == 1){
+                    return [new ILInstruction(ILOpcode.Br, 2)];
+                }
+                throw new Exception("Expecting break == 1 length: "+objStatement.ToString());
             }
             else if(name == "++"){
                 if(objStatement.Length == 2){
