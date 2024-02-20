@@ -1,133 +1,73 @@
 
-function Parser(code){
-    var index = 0;
-
-    function IsWhitespace(c){
-        return c==' ' || c=='\t' || c=='\n' || c=='\r';
-    }
-
-    function Parse(){
-        var result = [];
-        while(true){
-            if(index>=code.length){
-                return result;
-            }
-            else if(code[index] == ')'){
-                index++;
-                return result;
-            }
-            else if(code[index] == '('){
-                index++;
-                result.push(Parse());
-            }
-            else if(IsWhitespace(code[index])){
-                index++;
-            }
-            else if(code[index] == '"'){
-                var start = index;
-                index++;
-                while(true){
-                    if(code[index] == '"'){
-                        index++;
-                        result.push(code.substring(start, index));
-                        break;
-                    }
-                    index++;
-                }
-            }
-            else{
-                var start = index;
-                while(true){
-                    var breakVarname = index>=code.length
-                        || code[index] == '('
-                        || code[index] == ')'
-                        || code[index] == '"'
-                        || IsWhitespace(code[index]);
-                    if(breakVarname){
-                        result.push(code.substring(start, index));
-                        break;
-                    }
-                    index++;
-                }
-            }
-        }
-    }
-
-    return Parse();
-}
 
 function CompileAndRun(main){
+//#Parse.js
 //#WasmEmitter.js
-    var tree = Parser(lispProgram);
-    var importFunctions = [];
-    var functions = [];
     var errors = [];
-    var sections = {};
 
-    function FindFunctions(){
-        function AddFunction(v, _export){
-            if(!(v.length > 3)){
-                errors.push("export function expecting > 4 values: "+JSON.stringify(v));
-            }
-            else{
-                functions.push({returnType:v[1], export:_export, name:v[2], parameters:v[3], body:v.slice(4)});
-            }
-        }
+    var expression = new Or();
 
-        for(var v of tree){
-            
-            if(v[0] == "import_fn"){
-                if(v.length != 4) {
-                    errors.push("import function expecting 4 values: "+JSON.stringify(v));
-                }
-                else{
-                    importFunctions.push({returnType:v[1], name:v[2], parameters:v[3], javascript:v[4]});
-                }
-            }
-            else if(v[0] == "export_fn"){
-                AddFunction(v, true);
-            }
-            else if(v[0] == "fn"){
-                AddFunction(v, false);
-            }
-            else{
-                errors.push("Unknown object: "+JSON.stringify(v));
-            }
+    var add = new Obj('+', [new Literal('+')], new Params('expressions', expression, 2));
+
+    expression.Init([new Varname(), new Int(), new String(), add]);
+
+    var _return = new Obj('return', [new Literal('return')], new Params('expressions', expression, 0, 1));
+
+    var assign = new Obj('=', [
+        new Literal('='),
+        ['name', new Varname()],
+        ['expression', expression]]);
+
+    var body = new Or([_return, assign]);
+
+    var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
+
+    var i32 = new Obj('i32', [new Literal('i32')], new Params('variables', new Varname()));
+
+    var fn = new Obj('fn', [
+        ['returnType', new Varname()],
+        ['name', new Varname()], 
+        ['parameters', parameters],
+        ['i32', i32]
+        ], 
+        new Params('body', body));
+
+    var importFn = new Obj('fn', [
+        ['returnType', new Varname()],
+        ['name', new Varname()], 
+        ['parameters', parameters],
+        ['javascript', new String()]
+        ]);
+
+    var exports = new Obj('exports', [new Literal('exports')], new Params('body', fn));
+
+    var nonExports = new Obj('nonExports', [new Literal('nonExports')], new Params('body', fn));
+
+    var imports = new Obj('imports', [new Literal('imports')], new Params('body', importFn));
+
+    var base = new Obj('base', [['imports',imports],['nonExports', nonExports],['exports', exports]]);
+
+    var tree = base.Parse(LispParser(lispProgram));
+
+    if(errors.length>0){
+        for(var e of errors){
+            console.log(e);
         }
+        throw "Parsing errors";
     }
 
-    function FindParameters(){
-        function ConvertParameters(f){
-            if(!Array.isArray(f.parameters)){
-                errors.push("parameters isnt an array: "+JSON.stringify(f));
-            }
-            else if(f.parameters%2 != 0){
-                errors.push("parameters length cannot be divided by 2: "+JSON.stringify(f));
-            }
-            else{
-                var result = [];
-                for(var i=0;i<f.parameters.length;i+=2){
-                    result.push({type:f.parameters[i], name:f.parameters[i+1]});
-                }
-                return result;
-            }
-        }
-
-        for(var f of importFunctions){
-            f.parameters = ConvertParameters(f);
-        }
-        for(var f of functions){
-            f.parameters = ConvertParameters(f);
-        }
+    var id = 0;
+    for(var f of tree.imports.body){
+        f.id = id;
+        id++;
     }
-
-    function SetFunctionIDs(){
-        for(var i=0;i<importFunctions.length;i++){
-            importFunctions[i].id = i;
-        }
-        for(var i=0;i<functions.length;i++){
-            functions[i].id = i+importFunctions.length;
-        }
+    for(var f of tree.nonExports.body){
+        f.id = id;
+        id++;
+    }
+    for(var f of tree.exports.body){
+        f.id = id;
+        id++;
     }
 
     function EmitTypeSection(){
@@ -135,7 +75,7 @@ function CompileAndRun(main){
             switch(typeName){
                 case 'float': return Valtype.f32;
                 case 'int': return Valtype.i32;
-                default: errors.push("Unexpected valtype: "+typeName);
+                default: throw "Unexpected valtype: "+typeName;
             }
         }
     
@@ -154,12 +94,13 @@ function CompileAndRun(main){
                 ...encodeVector(GetReturnArray(f.returnType)),
             ]);
         }
-        sections.type = createSection(Section.type, encodeVector([...EmitTypes(importFunctions), ...EmitTypes(functions)]));
+        return createSection(Section.type, encodeVector([
+            ...EmitTypes(tree.imports.body), ...EmitTypes(tree.nonExports.body), ...EmitTypes(tree.exports.body)]));
     }
 
     function EmitImportSection(){
         function EmitImportFunctions(){
-            return importFunctions.map((f,i)=>[
+            return tree.imports.body.map((f,i)=>[
                 ...encodeString("env"),
                 ...encodeString(f.name),
                 ExportType.func,
@@ -167,82 +108,68 @@ function CompileAndRun(main){
             ]);
         }
 
-        sections.import = createSection(Section.import, encodeVector([...EmitImportFunctions(), memoryImport]));
+        return createSection(Section.import, encodeVector([...EmitImportFunctions(), memoryImport]));
     }
-
+    
     function EmitFuncSection(){
-        sections.func = createSection(Section.func, encodeVector(functions.map(f=>unsignedLEB128(f.id))));
+        return createSection(Section.func, 
+            encodeVector([
+                ...tree.nonExports.body.map(f=>unsignedLEB128(f.id)),
+                ...tree.exports.body.map(f=>unsignedLEB128(f.id))]));
     }
 
     function EmitExportSection(){
-        sections.export = createSection(
+       return createSection(
             Section.export,
-            encodeVector(functions.filter((f)=>f.export).map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
+            encodeVector(tree.exports.body.map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
         );
     }
 
     function EmitCodeSection(){
 //#EmitFunction.js
-        sections.code = createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(f))));
+        return createSection(Section.code, encodeVector(
+            [...tree.nonExports.body.map(f=>EmitFunction(f)), ...tree.exports.body.map(f=>EmitFunction(f))]));
     }
 
-    function Run(){
-        function ImportObject(){
-            var code = "var importObject = {env:{}};\n";
-            code+="var global = {};\n";
-            for(var f of importFunctions){
-                code+="importObject.env."+f.name+"= (";
-                for(var i=0;i<f.parameters.length;i++){
-                    code+=f.parameters[i].name;
-                    if(i<f.parameters.length-1)
-                        code+=',';
-                }
-                code+=")=>{"
-                code+=f.javascript;
-                code+="};\n";
+    function ImportObject(){
+        var code = "var importObject = {env:{}};\n";
+        code+="var global = {};\n";
+        for(var f of tree.imports.body){
+            code+="importObject.env."+f.name+"= (";
+            for(var i=0;i<f.parameters.length;i++){
+                code+=f.parameters[i].name;
+                if(i<f.parameters.length-1)
+                    code+=',';
             }
-            code+="return importObject;\n"
-            return new Function('exports', code)(exports);
+            code+=")=>{"
+            code+=f.javascript;
+            code+="};\n";
         }
-
-        const wasm = Uint8Array.from([
-            ...magicModuleHeader,
-            ...moduleVersion,
-            ...sections.type,
-            ...sections.import,
-            ...sections.func,
-            ...sections.export,
-            ...sections.code,
-        ]);
-
-        var exports = {};
-        var importObject = ImportObject();
-        importObject.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
-        WebAssembly.instantiate(wasm, importObject).then(
-            (obj) => {
-                for(var f of functions){
-                    if(f.export){
-                        exports[f.name] = obj.instance.exports[f.name];
-                    }
-                }
-                console.log(obj.instance.exports[main]());
-            }
-        );
+        code+="return importObject;\n"
+        return new Function('exports', code)(exports);
     }
-        
 
-    function Stages(funcs){
-        for(var f of funcs){
-            f();
-            if(errors.length>0){
-                console.log(errors);
-                return;
+    const wasm = Uint8Array.from([
+        ...magicModuleHeader,
+        ...moduleVersion,
+        ...EmitTypeSection(),
+        ...EmitImportSection(),
+        ...EmitFuncSection(),
+        ...EmitExportSection(),
+        ...EmitCodeSection(),
+    ]);
+
+    var exports = {};
+    var importObject = ImportObject();
+    importObject.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
+    WebAssembly.instantiate(wasm, importObject).then(
+        (obj) => {
+            for(var f of tree.exports.body){
+                exports[f.name] = obj.instance.exports[f.name];
             }
+            console.log(obj.instance.exports[main]());
         }
-    }
-
-    Stages([FindFunctions, FindParameters, SetFunctionIDs, EmitTypeSection, 
-        EmitImportSection, EmitFuncSection, EmitExportSection, EmitCodeSection, Run]);
+    );
 }
 CompileAndRun("Main");
 

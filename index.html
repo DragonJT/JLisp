@@ -6,20 +6,35 @@
 </head>
 <body>
   <script>
-  var lispProgram = `(export_fn int Main ()
-    (var x 6)
-    (ret (+ x 5)
+  var lispProgram = `(imports)
+
+(nonExports)
+
+(exports
+    (int Main ()
+        (i32 x y)
+        (= y 2)
+        (= x (+ 5 5))
+        (= x (+ x y))
+        (return x)
+    )
 )`;
   
-function Parser(code){
+
+function CompileAndRun(main){
+function LispParser(code){
     var index = 0;
+
+    function IsDigit(c){
+        return c>='0' && c<='9';
+    }
 
     function IsWhitespace(c){
         return c==' ' || c=='\t' || c=='\n' || c=='\r';
     }
 
     function Parse(){
-        var result = [];
+        var result = ['obj'];
         while(true){
             if(index>=code.length){
                 return result;
@@ -41,7 +56,7 @@ function Parser(code){
                 while(true){
                     if(code[index] == '"'){
                         index++;
-                        result.push(code.substring(start, index));
+                        result.push(['string', code.substring(start, index)]);
                         break;
                     }
                     index++;
@@ -56,7 +71,13 @@ function Parser(code){
                         || code[index] == '"'
                         || IsWhitespace(code[index]);
                     if(breakVarname){
-                        result.push(code.substring(start, index));
+                        var value = code.substring(start, index);
+                        if(IsDigit(value[0])){
+                            result.push(['int', parseFloat(value)]);
+                        }
+                        else{
+                            result.push(['varname', value]);
+                        }
                         break;
                     }
                     index++;
@@ -68,7 +89,196 @@ function Parser(code){
     return Parse();
 }
 
-function CompileAndRun(main){
+class Literal{
+    constructor(literal){
+        this.literal = literal;
+    }
+
+    Check(obj){
+        return (obj[0] == 'varname' && obj[1] == this.literal);
+    }
+
+    Parse(obj){
+        return undefined;
+    }
+}
+
+class String{
+    Check(obj){
+        return (obj[0] == 'string');
+    }
+
+    Parse(obj){
+        return obj[1];
+    }
+}
+
+class Varname{
+    Check(obj){
+        return (obj[0] == 'varname');
+    }
+
+    Parse(obj){
+        return obj[1];
+    }
+}
+
+class Int{
+    Check(obj){
+        return (obj[0] == 'int');
+    }
+
+    Parse(obj){
+        return obj[1];
+    }
+}
+
+class Or{
+    constructor(branches){
+        this.Init(branches);
+    }
+
+    Init(branches){
+        this.branches = branches;
+    }
+
+    Check(obj){
+        for(var b of this.branches){
+            if(b.Check(obj)){
+                return true;
+            }
+        }
+        return false;
+    }
+
+    Parse(obj){
+        for(var b of this.branches){
+            if(b.Check(obj)){
+                var result = b.Parse(obj);
+                if(typeof result != 'object'){
+                    return {type:b.constructor.name, value:result};
+                }
+                return result;
+            }
+        }
+        errors.push("not found branch: "+JSON.stringify(this.branches.map(o=>o.type))+" got: "+JSON.stringify(obj));
+    }
+}
+
+class ArrayMultipleOf2{
+    constructor(item1, item2){
+        this.IsArrayMultipleOf2 = true;
+        this.Init(item1, item2);
+    }
+
+    Init(item1, item2){
+        this.item1 = item1;
+        this.item2 = item2;
+    }
+
+    Check(obj){
+        return (obj[0] == 'obj');
+    }
+
+    Parse(obj){
+        if((obj.length-1)%2 == 0){
+            var result = [];
+            for(var i=1;i<obj.length;i+=2){
+                var obj = {};
+                obj[this.item1[0]] = this.item1[1].Parse(obj[i]);
+                obj[this.item1[0]] = this.item2[1].Parse(obj[i+1]);
+                result.push(obj);
+            }
+            return result;
+        }
+        else{
+            errors.push('Expecting obj length to be multiple of 2: '+JSON.stringify(obj));
+        }
+    }
+}
+
+class Params{
+    constructor(name, element, min, max){
+        this.name = name;
+        this.element = element;
+        this.min = min;
+        this.max = max;
+    }
+}
+
+class Obj{
+    constructor(type, fields, params){
+        this.Init(type, fields, params);
+    }
+
+    Init(type, fields, params){
+        this.type = type;
+        this.fields = fields;
+        this.params = params;
+    }
+
+    CheckLength(obj){
+        if(this.params){
+            var minValid = this.params.min==undefined || (obj.length >= this.fields.length+1+this.params.min);
+            var maxValid = this.params.max==undefined || (obj.length <= this.fields.length+1+this.params.max);
+            return minValid && maxValid;
+        }
+        else{
+            return obj.length == this.fields.length+1;
+        }
+    }
+
+    Check(obj){
+        if(obj[0] != 'obj'){
+            return false;
+        }
+        if(!this.CheckLength(obj)){
+            return false;
+        }
+        for(var i=0;i<this.fields.length;i++){
+            if(!Array.isArray(this.fields[i])){
+                if(!this.fields[i].Check(obj[i+1])){
+                    return false;
+                }
+            }
+            else{
+                if(!this.fields[i][1].Check(obj[i+1])){
+                    return false;
+                }
+            }
+        }
+        if(this.params){
+            for(var i=this.fields.length+1;i<obj.length;i++){
+                if(!this.params.element.Check(obj[i])){
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    Parse(obj){
+        var result = {};
+        result.type = this.type;
+        for(var i=0;i<this.fields.length;i++){
+            if(Array.isArray(this.fields[i])){
+                var name = this.fields[i][0];
+                var parser = this.fields[i][1];
+                result[name] = parser.Parse(obj[i+1]);
+            }
+        }
+        if(this.params){
+            var name = this.params.name;
+            var paramsResult = [];
+            for(var i=this.fields.length+1;i<obj.length;i++){
+                paramsResult.push(this.params.element.Parse(obj[i]));
+            }
+            result[name] = paramsResult;
+        }
+        return result;
+    }
+}
+
 //copied quite a lot from https://github.com/ColinEberhardt/chasm
 
 // https://webassembly.github.io/spec/core/binary/instructions.html
@@ -236,76 +446,71 @@ const memoryImport = [
     0x00,
     unsignedLEB128(10),
   ];
-    var tree = Parser(lispProgram);
-    var importFunctions = [];
-    var functions = [];
     var errors = [];
-    var sections = {};
 
-    function FindFunctions(){
-        function AddFunction(v, _export){
-            if(!(v.length > 3)){
-                errors.push("export function expecting > 4 values: "+JSON.stringify(v));
-            }
-            else{
-                functions.push({returnType:v[1], export:_export, name:v[2], parameters:v[3], body:v.slice(4)});
-            }
-        }
+    var expression = new Or();
 
-        for(var v of tree){
-            
-            if(v[0] == "import_fn"){
-                if(v.length != 4) {
-                    errors.push("import function expecting 4 values: "+JSON.stringify(v));
-                }
-                else{
-                    importFunctions.push({returnType:v[1], name:v[2], parameters:v[3], javascript:v[4]});
-                }
-            }
-            else if(v[0] == "export_fn"){
-                AddFunction(v, true);
-            }
-            else if(v[0] == "fn"){
-                AddFunction(v, false);
-            }
-            else{
-                errors.push("Unknown object: "+JSON.stringify(v));
-            }
+    var add = new Obj('+', [new Literal('+')], new Params('expressions', expression, 2));
+
+    expression.Init([new Varname(), new Int(), new String(), add]);
+
+    var _return = new Obj('return', [new Literal('return')], new Params('expressions', expression, 0, 1));
+
+    var assign = new Obj('=', [
+        new Literal('='),
+        ['name', new Varname()],
+        ['expression', expression]]);
+
+    var body = new Or([_return, assign]);
+
+    var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
+
+    var i32 = new Obj('i32', [new Literal('i32')], new Params('variables', new Varname()));
+
+    var fn = new Obj('fn', [
+        ['returnType', new Varname()],
+        ['name', new Varname()], 
+        ['parameters', parameters],
+        ['i32', i32]
+        ], 
+        new Params('body', body));
+
+    var importFn = new Obj('fn', [
+        ['returnType', new Varname()],
+        ['name', new Varname()], 
+        ['parameters', parameters],
+        ['javascript', new String()]
+        ]);
+
+    var exports = new Obj('exports', [new Literal('exports')], new Params('body', fn));
+
+    var nonExports = new Obj('nonExports', [new Literal('nonExports')], new Params('body', fn));
+
+    var imports = new Obj('imports', [new Literal('imports')], new Params('body', importFn));
+
+    var base = new Obj('base', [['imports',imports],['nonExports', nonExports],['exports', exports]]);
+
+    var tree = base.Parse(LispParser(lispProgram));
+
+    if(errors.length>0){
+        for(var e of errors){
+            console.log(e);
         }
+        throw "Parsing errors";
     }
 
-    function FindParameters(){
-        function ConvertParameters(f){
-            if(!Array.isArray(f.parameters)){
-                errors.push("parameters isnt an array: "+JSON.stringify(f));
-            }
-            else if(f.parameters%2 != 0){
-                errors.push("parameters length cannot be divided by 2: "+JSON.stringify(f));
-            }
-            else{
-                var result = [];
-                for(var i=0;i<f.parameters.length;i+=2){
-                    result.push({type:f.parameters[i], name:f.parameters[i+1]});
-                }
-                return result;
-            }
-        }
-
-        for(var f of importFunctions){
-            f.parameters = ConvertParameters(f);
-        }
-        for(var f of functions){
-            f.parameters = ConvertParameters(f);
-        }
+    var id = 0;
+    for(var f of tree.imports.body){
+        f.id = id;
+        id++;
     }
-
-    function SetFunctionIDs(){
-        for(var i=0;i<importFunctions.length;i++){
-            importFunctions[i].id = i;
-        }
-        for(var i=0;i<functions.length;i++){
-            functions[i].id = i+importFunctions.length;
-        }
+    for(var f of tree.nonExports.body){
+        f.id = id;
+        id++;
+    }
+    for(var f of tree.exports.body){
+        f.id = id;
+        id++;
     }
 
     function EmitTypeSection(){
@@ -313,7 +518,7 @@ const memoryImport = [
             switch(typeName){
                 case 'float': return Valtype.f32;
                 case 'int': return Valtype.i32;
-                default: errors.push("Unexpected valtype: "+typeName);
+                default: throw "Unexpected valtype: "+typeName;
             }
         }
     
@@ -332,12 +537,13 @@ const memoryImport = [
                 ...encodeVector(GetReturnArray(f.returnType)),
             ]);
         }
-        sections.type = createSection(Section.type, encodeVector([...EmitTypes(importFunctions), ...EmitTypes(functions)]));
+        return createSection(Section.type, encodeVector([
+            ...EmitTypes(tree.imports.body), ...EmitTypes(tree.nonExports.body), ...EmitTypes(tree.exports.body)]));
     }
 
     function EmitImportSection(){
         function EmitImportFunctions(){
-            return importFunctions.map((f,i)=>[
+            return tree.imports.body.map((f,i)=>[
                 ...encodeString("env"),
                 ...encodeString(f.name),
                 ExportType.func,
@@ -345,157 +551,120 @@ const memoryImport = [
             ]);
         }
 
-        sections.import = createSection(Section.import, encodeVector([...EmitImportFunctions(), memoryImport]));
+        return createSection(Section.import, encodeVector([...EmitImportFunctions(), memoryImport]));
     }
-
+    
     function EmitFuncSection(){
-        sections.func = createSection(Section.func, encodeVector(functions.map(f=>unsignedLEB128(f.id))));
+        return createSection(Section.func, 
+            encodeVector([
+                ...tree.nonExports.body.map(f=>unsignedLEB128(f.id)),
+                ...tree.exports.body.map(f=>unsignedLEB128(f.id))]));
     }
 
     function EmitExportSection(){
-        sections.export = createSection(
+       return createSection(
             Section.export,
-            encodeVector(functions.filter((f)=>f.export).map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
+            encodeVector(tree.exports.body.map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
         );
     }
 
     function EmitCodeSection(){
 function EmitFunction(f){
     var wasm = [];
+    var i32Count = f.i32.variables.length;
     var locals = {};
-    var localCount = 0;
-
-    function IsDigit(c){
-        return c>='0' && c<='9';
-    }
-
-    function IsCharacter(c){
-        return (c>='a' && c<='z') || (c>='A' && c<='Z') || c=='_';
+    var id = 0;
+    for(var v of f.i32.variables){
+        locals[v] = {id};
+        id++;
     }
 
     function EmitExpression(expression){
-        if(!Array.isArray(expression)){
-            if(IsDigit(expression)){
-                wasm.push(Opcode.i32_const, ...signedLEB128(parseFloat(expression[0])));
-            }
-            else if(IsCharacter(expression)){
-                var local = locals[expression];
-                if(!local){
-                    errors.push("Cant find local: "+expression);
+        if(expression.type == 'Varname'){
+            wasm.push(Opcode.get_local, locals[expression.value].id);
+            return;
+        }
+        else if(expression.type == 'Int'){
+            wasm.push(Opcode.i32_const, ...signedLEB128(expression.value));
+            return;
+        }
+        else if(expression.type == '+'){
+            for(var i=0;i<expression.expressions.length;i++){
+                EmitExpression(expression.expressions[i]);
+                if(i>0){
+                    wasm.push(Opcode.i32_add);
                 }
-                else{
-                    wasm.push(Opcode.get_local, ...unsignedLEB128(local.id));
-                }
-            }
-            else{
-                errors.push("Unexpected expression: "+expression);
             }
         }
         else{
-            if(expression.length >= 3 && expression[0] == "+"){
-                for(var i=1;i<expression.length;i++){
-                    EmitExpression(expression[i]);
-                    if(i>1){
-                        wasm.push(Opcode.i32_add);
-                    }
-                }                
-            }
-            else{
-                errors.push("Unexpected expression: "+expression);
-            }
+            throw "Unexpected expression: "+JSON.stringify(expression);
         }
     }
 
-    for(var statement of f.body){
-        if(statement[0] == "ret"){
-            if(statement.length == 1){
-                wasm.push(Opcode.return);
-            }
-            else if(statement.length == 2){
-                EmitExpression(statement[1]);
-                wasm.push(Opcode.return);
-            }
-            else{
-                errors.push("ret expecting length 1 or 2. Has length: "+statement.length);
-            }
+    function EmitStatement(statement){
+        if(statement.type == '='){
+            EmitExpression(statement.expression);
+            wasm.push(Opcode.set_local, locals[statement.name].id);
         }
-        else if(statement[0] == "var"){
-            if(statement.length == 3){
-                locals[statement[1]] = {id:localCount};
-                EmitExpression(statement[2]);
-                wasm.push(Opcode.set_local, ...unsignedLEB128(localCount));
-                localCount++;
+        else if(statement.type == 'return'){
+            if(statement.expressions.length == 1){
+                EmitExpression(statement.expressions[0]);
             }
-            else{
-                errors.push("var expecting length 3. Has length: "+statement.length);
-            }
+            wasm.push(Opcode.return);
         }
         else{
-            errors.push("Unexpected statement: "+JSON.stringify(statement));
+            throw "Unexpected statement: "+JSON.stringify(statement);
         }
     }
-    return encodeVector([...encodeVector([encodeLocal(localCount, Valtype.i32)]), ...wasm, Opcode.end])
+
+    for(var s of f.body){
+        EmitStatement(s);
+    }
+    return encodeVector([...encodeVector([encodeLocal(i32Count, Valtype.i32)]), ...wasm, Opcode.end])
 }
-        sections.code = createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(f))));
+        return createSection(Section.code, encodeVector(
+            [...tree.nonExports.body.map(f=>EmitFunction(f)), ...tree.exports.body.map(f=>EmitFunction(f))]));
     }
 
-    function Run(){
-        function ImportObject(){
-            var code = "var importObject = {env:{}};\n";
-            code+="var global = {};\n";
-            for(var f of importFunctions){
-                code+="importObject.env."+f.name+"= (";
-                for(var i=0;i<f.parameters.length;i++){
-                    code+=f.parameters[i].name;
-                    if(i<f.parameters.length-1)
-                        code+=',';
-                }
-                code+=")=>{"
-                code+=f.javascript;
-                code+="};\n";
+    function ImportObject(){
+        var code = "var importObject = {env:{}};\n";
+        code+="var global = {};\n";
+        for(var f of tree.imports.body){
+            code+="importObject.env."+f.name+"= (";
+            for(var i=0;i<f.parameters.length;i++){
+                code+=f.parameters[i].name;
+                if(i<f.parameters.length-1)
+                    code+=',';
             }
-            code+="return importObject;\n"
-            return new Function('exports', code)(exports);
+            code+=")=>{"
+            code+=f.javascript;
+            code+="};\n";
         }
-
-        const wasm = Uint8Array.from([
-            ...magicModuleHeader,
-            ...moduleVersion,
-            ...sections.type,
-            ...sections.import,
-            ...sections.func,
-            ...sections.export,
-            ...sections.code,
-        ]);
-
-        var exports = {};
-        var importObject = ImportObject();
-        importObject.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
-        WebAssembly.instantiate(wasm, importObject).then(
-            (obj) => {
-                for(var f of functions){
-                    if(f.export){
-                        exports[f.name] = obj.instance.exports[f.name];
-                    }
-                }
-                console.log(obj.instance.exports[main]());
-            }
-        );
+        code+="return importObject;\n"
+        return new Function('exports', code)(exports);
     }
-        
 
-    function Stages(funcs){
-        for(var f of funcs){
-            f();
-            if(errors.length>0){
-                console.log(errors);
-                return;
+    const wasm = Uint8Array.from([
+        ...magicModuleHeader,
+        ...moduleVersion,
+        ...EmitTypeSection(),
+        ...EmitImportSection(),
+        ...EmitFuncSection(),
+        ...EmitExportSection(),
+        ...EmitCodeSection(),
+    ]);
+
+    var exports = {};
+    var importObject = ImportObject();
+    importObject.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
+    WebAssembly.instantiate(wasm, importObject).then(
+        (obj) => {
+            for(var f of tree.exports.body){
+                exports[f.name] = obj.instance.exports[f.name];
             }
+            console.log(obj.instance.exports[main]());
         }
-    }
-
-    Stages([FindFunctions, FindParameters, SetFunctionIDs, EmitTypeSection, 
-        EmitImportSection, EmitFuncSection, EmitExportSection, EmitCodeSection, Run]);
+    );
 }
 CompileAndRun("Main");
 
