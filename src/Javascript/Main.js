@@ -34,20 +34,24 @@ function CompileAndRun(main){
         ], 
         new Params('body', body));
 
-    var importFn = new Obj('fn', [
+    var exportFn = new Obj('exportFn', [
+        new Literal('export'),
+        ['returnType', new Varname()],
+        ['name', new Varname()], 
+        ['parameters', parameters],
+        ['int', int]
+        ], 
+        new Params('body', body));
+
+    var importFn = new Obj('importFn', [
+        new Literal('import'),
         ['returnType', new Varname()],
         ['name', new Varname()], 
         ['parameters', parameters],
         ['javascript', new String()]
         ]);
 
-    var exports = new Obj('exports', [new Literal('exports')], new Params('body', fn));
-
-    var nonExports = new Obj('nonExports', [new Literal('nonExports')], new Params('body', fn));
-
-    var imports = new Obj('imports', [new Literal('imports')], new Params('body', importFn));
-
-    var base = new Obj('base', [['imports',imports],['nonExports', nonExports],['exports', exports]]);
+    var base = new Obj('base', [], new Params('values', new Or([importFn, exportFn, fn])));
 
     var lispTree = LispParser(lispProgram);
     if(!base.Check(lispTree)){
@@ -62,18 +66,14 @@ function CompileAndRun(main){
         throw "Parsing errors";
     }
 
-    var id = 0;
-    for(var f of tree.imports.body){
-        f.id = id;
-        id++;
-    }
-    for(var f of tree.nonExports.body){
-        f.id = id;
-        id++;
-    }
-    for(var f of tree.exports.body){
-        f.id = id;
-        id++;
+    var importFunctions = tree.values.filter(v=>v.type == 'importFn');
+    var nonExportFunctions = tree.values.filter(v=>v.type == 'fn');
+    var exportFunctions = tree.values.filter(v=>v.type == 'exportFn');
+    var functions = [...nonExportFunctions, ...exportFunctions];
+    var allFunctions = [...importFunctions, ...functions];
+
+    for(var i=0;i<allFunctions.length;i++){
+        allFunctions[i].id = i;
     }
 
     function EmitTypeSection(){
@@ -100,13 +100,12 @@ function CompileAndRun(main){
                 ...encodeVector(GetReturnArray(f.returnType)),
             ]);
         }
-        return createSection(Section.type, encodeVector([
-            ...EmitTypes(tree.imports.body), ...EmitTypes(tree.nonExports.body), ...EmitTypes(tree.exports.body)]));
+        return createSection(Section.type, encodeVector(EmitTypes(allFunctions)));
     }
 
     function EmitImportSection(){
         function EmitImportFunctions(){
-            return tree.imports.body.map((f,i)=>[
+            return importFunctions.map((f,i)=>[
                 ...encodeString("env"),
                 ...encodeString(f.name),
                 ExportType.func,
@@ -118,29 +117,25 @@ function CompileAndRun(main){
     }
     
     function EmitFuncSection(){
-        return createSection(Section.func, 
-            encodeVector([
-                ...tree.nonExports.body.map(f=>unsignedLEB128(f.id)),
-                ...tree.exports.body.map(f=>unsignedLEB128(f.id))]));
+        return createSection(Section.func, encodeVector(functions.map(f=>f.id)));
     }
 
     function EmitExportSection(){
        return createSection(
             Section.export,
-            encodeVector(tree.exports.body.map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
+            encodeVector(exportFunctions.map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
         );
     }
 
     function EmitCodeSection(){
 //#EmitFunction.js
-        return createSection(Section.code, encodeVector(
-            [...tree.nonExports.body.map(f=>EmitFunction(tree, f)), ...tree.exports.body.map(f=>EmitFunction(tree, f))]));
+        return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(allFunctions, f))));
     }
 
     function ImportObject(){
         var code = "var importObject = {env:{}};\n";
         code+="var global = {};\n";
-        for(var f of tree.imports.body){
+        for(var f of importFunctions){
             code+="importObject.env."+f.name+"= (";
             for(var i=0;i<f.parameters.length;i++){
                 code+=f.parameters[i].name;
@@ -170,10 +165,10 @@ function CompileAndRun(main){
     importObject.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
     WebAssembly.instantiate(wasm, importObject).then(
         (obj) => {
-            for(var f of tree.exports.body){
+            for(var f of exportFunctions){
                 exports[f.name] = obj.instance.exports[f.name];
             }
-            console.log(obj.instance.exports[main]());
+            console.log(exports[main]());
         }
     );
 }

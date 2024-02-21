@@ -1,16 +1,10 @@
-(imports
-    (void PrintInt (int i) "console.log(i);")
-)
+(import void PrintInt (int i) "console.log(i);")
 
-(nonExports)
-
-(exports
-    (int Main ()
-        (int x y)
-        (= y 2)
-        (= x (+ 5 5))
-        (PrintInt x)
-        (= x (+ x y))
-        (return x)
-    )
+(export int Main ()
+    (int x y)
+    (= y 4)
+    (= x (+ 5 3))
+    (PrintInt x)
+    (= x (+ x y))
+    (return x)
 )

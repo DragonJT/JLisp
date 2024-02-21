@@ -1,15 +1,9 @@
-function EmitFunction(tree, f){
+function EmitFunction(allFunctions, f){
     var wasm = [];
     var i32Count = f.int.variables.length;
 
     var functions = {};
-    for(var f of tree.imports.body){
-        functions[f.name] = f;
-    }
-    for(var f of tree.nonExports.body){
-        functions[f.name] = f;
-    }
-    for(var f of tree.exports.body){
+    for(var f of allFunctions){
         functions[f.name] = f;
     }
 
