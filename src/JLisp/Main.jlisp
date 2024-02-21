@@ -5,7 +5,13 @@
 )
 
 (export int Main ()
-    (var x (Test 4 5))
-    (PrintInt 45) 
-    (return x) 
+    (var i 0)
+    (loop 
+        (= i (+ i 2))
+        (PrintInt i)
+        (if (> i 10) 
+            (break)
+        )
+    )
+    (return i)
 )

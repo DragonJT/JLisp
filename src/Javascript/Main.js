@@ -15,20 +15,32 @@ function CompileAndRun(main, code){
 
     var sub = new Obj('-', [new Literal('-')], new Params('values', expression, 2));
 
+    var lt = new Obj('<', [new Literal('<')], new Params('values', expression, 2));
+
+    var gt = new Obj('>', [new Literal('>')], new Params('values', expression, 2));
+
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, call]);
+    expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, lt, gt, call]);
+
+    var body = new Or();
 
     var _return = new Obj('return', [new Literal('return')], new Params('values', expression, 0, 1));
 
     var _var = new Obj('var', [new Literal('var'), ['name', new Varname()], ['value', expression]]);
+
+    var _if = new Obj('if', [new Literal('if'), ['condition', expression]], new Params('body', body));
+
+    var _break = new Obj('break', [new Literal('break')]);
+
+    var loop = new Obj('loop',  [new Literal('loop')], new Params('body', body));
 
     var assign = new Obj('=', [
         new Literal('='),
         ['name', new Varname()],
         ['value', expression]]);
 
-    var body = new Or([_return, assign, _var, call]);
+    body.Init([_return, assign, _if, _var, loop, _break, call]);
 
     var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
 

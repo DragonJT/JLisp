@@ -13,9 +13,15 @@
 )
 
 (export int Main ()
-    (var x (Test 4 5))
-    (PrintInt 45) 
-    (return x) 
+    (var i 0)
+    (loop 
+        (= i (+ i 2))
+        (PrintInt i)
+        (if (> i 10) 
+            (break)
+        )
+    )
+    (return i)
 )`;
   
 
@@ -456,20 +462,32 @@ const memoryImport = [
 
     var sub = new Obj('-', [new Literal('-')], new Params('values', expression, 2));
 
+    var lt = new Obj('<', [new Literal('<')], new Params('values', expression, 2));
+
+    var gt = new Obj('>', [new Literal('>')], new Params('values', expression, 2));
+
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, call]);
+    expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, lt, gt, call]);
+
+    var body = new Or();
 
     var _return = new Obj('return', [new Literal('return')], new Params('values', expression, 0, 1));
 
     var _var = new Obj('var', [new Literal('var'), ['name', new Varname()], ['value', expression]]);
+
+    var _if = new Obj('if', [new Literal('if'), ['condition', expression]], new Params('body', body));
+
+    var _break = new Obj('break', [new Literal('break')]);
+
+    var loop = new Obj('loop',  [new Literal('loop')], new Params('body', body));
 
     var assign = new Obj('=', [
         new Literal('='),
         ['name', new Varname()],
         ['value', expression]]);
 
-    var body = new Or([_return, assign, _var, call]);
+    body.Init([_return, assign, _if, _var, loop, _break, call]);
 
     var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
 
@@ -585,19 +603,45 @@ function EmitFunction(functionFinder, f){
         variables[v.name]= {id};
         id++;
     }
-    for(var s of f.body){
-        if(s.type == 'var'){
-            variables[s.name] = {id};
-            i32Count++;
-            id++;
+
+    function FindLocalsInBody(body){
+        for(var s of body){
+            if(s.type == 'var'){
+                variables[s.name] = {id};
+                i32Count++;
+                id++;
+            }
+            else if(s.type == 'if'){
+                FindLocalsInBody(s.body);
+            }
+            else if(s.type == 'loop'){
+                FindLocalsInBody(s.body);
+            }
         }
     }
+    FindLocalsInBody(f.body);
+
+    var breakDepth = 0;
 
     function EmitCall(call){
         for(var a of call.args){
             EmitExpression(a);
         }
         wasm.push(Opcode.call, ...unsignedLEB128(functionFinder[call.name].id));
+    }
+
+    function EmitOperatorNumbersInBoolOut(expression, op){
+        var stackSize = 0;
+        for(var i=0;i<expression.values.length-1;i++){
+            EmitExpression(expression.values[i]);
+            EmitExpression(expression.values[i+1]);
+            wasm.push(op);
+            stackSize++;
+        }
+        while(stackSize>1){
+            wasm.push(Opcode.i32_and);
+            stackSize--;
+        }
     }
 
     function EmitArithmenticOperator(expression, op){
@@ -628,6 +672,12 @@ function EmitFunction(functionFinder, f){
         else if(expression.type == '-'){
             EmitArithmenticOperator(expression, Opcode.i32_sub);
         }
+        else if(expression.type == '<'){
+            EmitOperatorNumbersInBoolOut(expression, Opcode.i32_lt);
+        }
+        else if(expression.type == '>'){
+            EmitOperatorNumbersInBoolOut(expression, Opcode.i32_gt)
+        }
         else if(expression.type == 'call'){
             EmitCall(expression);
         }
@@ -647,6 +697,24 @@ function EmitFunction(functionFinder, f){
             }
             wasm.push(Opcode.return);
         }
+        else if(statement.type == 'if'){
+            EmitExpression(statement.condition);
+            wasm.push(Opcode.if, Blocktype.void);
+            EmitBody(statement.body);
+            wasm.push(Opcode.end);
+        }
+        else if(statement.type == 'loop'){
+            wasm.push(Opcode.block, Blocktype.void);
+            wasm.push(Opcode.loop, Blocktype.void);
+            breakDepth = 0;
+            EmitBody(statement.body);
+            wasm.push(Opcode.br, ...unsignedLEB128(0));
+            wasm.push(Opcode.end);
+            wasm.push(Opcode.end);
+        }
+        else if(statement.type == 'break'){
+            wasm.push(Opcode.br, ...unsignedLEB128(breakDepth));
+        }
         else if(statement.type == 'call'){
             EmitCall(statement);
         }
@@ -659,9 +727,15 @@ function EmitFunction(functionFinder, f){
         }
     }
 
-    for(var s of f.body){
-        EmitStatement(s);
+    function EmitBody(body){
+        breakDepth++;
+        for(var s of body){
+            EmitStatement(s);
+        }
+        breakDepth--;
     }
+    
+    EmitBody(f.body);
     return encodeVector([...encodeVector([encodeLocal(i32Count, Valtype.i32)]), ...wasm, Opcode.end])
 }
         return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(functionFinder, f))));
