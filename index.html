@@ -10,21 +10,18 @@
 
 (int Test (int x int y) 
     (int)
-    (return (+ x y))
+    (return (* x y))
 )
 
 (export int Main ()
-    (int x y)
-    (= y 4)
-    (= x (+ 5 3))
-    (PrintInt x)
-    (PrintInt (Test x y))
-    (return (+ x 5))
-)
-`;
+    (int x)
+    (= x (Test 4 5))
+    (PrintInt 45) 
+    (return x) 
+)`;
   
 
-function CompileAndRun(main){
+function CompileAndRun(main, code){
 function LispParser(code){
     var index = 0;
 
@@ -455,9 +452,15 @@ const memoryImport = [
 
     var add = new Obj('+', [new Literal('+')], new Params('expressions', expression, 2));
 
+    var mul = new Obj('*', [new Literal('*')], new Params('expressions', expression, 2));
+
+    var div = new Obj('/', [new Literal('/')], new Params('expressions', expression, 2));
+
+    var sub = new Obj('-', [new Literal('-')], new Params('expressions', expression, 2));
+
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Int(), new String(), add, call]);
+    expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, call]);
 
     var _return = new Obj('return', [new Literal('return')], new Params('expressions', expression, 0, 1));
 
@@ -499,7 +502,7 @@ const memoryImport = [
 
     var base = new Obj('base', [], new Params('values', new Or([importFn, exportFn, fn])));
 
-    var lispTree = LispParser(lispProgram);
+    var lispTree = LispParser(code);
     if(!base.Check(lispTree)){
         throw "Cannot begin parse";
     }
@@ -599,6 +602,15 @@ function EmitFunction(functionFinder, f){
         wasm.push(Opcode.call, ...unsignedLEB128(functionFinder[call.name].id));
     }
 
+    function EmitArithmenticOperator(expression, op){
+        for(var i=0;i<expression.expressions.length;i++){
+            EmitExpression(expression.expressions[i]);
+            if(i>0){
+                wasm.push(op);
+            }
+        }
+    }
+
     function EmitExpression(expression){
         if(expression.type == 'Varname'){
             wasm.push(Opcode.get_local, variables[expression.value].id);
@@ -607,12 +619,16 @@ function EmitFunction(functionFinder, f){
             wasm.push(Opcode.i32_const, ...signedLEB128(expression.value));
         }
         else if(expression.type == '+'){
-            for(var i=0;i<expression.expressions.length;i++){
-                EmitExpression(expression.expressions[i]);
-                if(i>0){
-                    wasm.push(Opcode.i32_add);
-                }
-            }
+            EmitArithmenticOperator(expression, Opcode.i32_add);
+        }
+        else if(expression.type == '*'){
+            EmitArithmenticOperator(expression, Opcode.i32_mul);
+        }
+        else if(expression.type == '/'){
+            EmitArithmenticOperator(expression, Opcode.i32_div);
+        }
+        else if(expression.type == '-'){
+            EmitArithmenticOperator(expression, Opcode.i32_sub);
         }
         else if(expression.type == 'call'){
             EmitCall(expression);
@@ -689,7 +705,34 @@ function EmitFunction(functionFinder, f){
         }
     );
 }
-CompileAndRun("Main");
+
+function CreateUI(){
+    var textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+    textarea.value = lispProgram;
+    textarea.rows = 15;
+    textarea.cols = 60;
+    textarea.onkeydown = (e)=> {
+        if (e.key == "Tab") {
+            e.preventDefault();
+        
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+        
+            textarea.value = textarea.value.substring(0, start) + "     " + textarea.value.substring(end);
+        
+            textarea.selectionStart = textarea.selectionEnd = start + 4;
+        }
+    }
+
+    var runbutton = document.createElement('button');
+    document.body.appendChild(runbutton);
+    runbutton.innerHTML = 'run';
+    runbutton.onclick = ()=>{CompileAndRun('Main', textarea.value)}
+}
+
+CreateUI();
+CompileAndRun("Main", lispProgram);
 
 
   </script>

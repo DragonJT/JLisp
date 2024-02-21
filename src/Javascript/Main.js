@@ -1,6 +1,6 @@
 
 
-function CompileAndRun(main){
+function CompileAndRun(main, code){
 //#Parse.js
 //#WasmEmitter.js
     var errors = [];
@@ -9,9 +9,15 @@ function CompileAndRun(main){
 
     var add = new Obj('+', [new Literal('+')], new Params('expressions', expression, 2));
 
+    var mul = new Obj('*', [new Literal('*')], new Params('expressions', expression, 2));
+
+    var div = new Obj('/', [new Literal('/')], new Params('expressions', expression, 2));
+
+    var sub = new Obj('-', [new Literal('-')], new Params('expressions', expression, 2));
+
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Int(), new String(), add, call]);
+    expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, call]);
 
     var _return = new Obj('return', [new Literal('return')], new Params('expressions', expression, 0, 1));
 
@@ -53,7 +59,7 @@ function CompileAndRun(main){
 
     var base = new Obj('base', [], new Params('values', new Or([importFn, exportFn, fn])));
 
-    var lispTree = LispParser(lispProgram);
+    var lispTree = LispParser(code);
     if(!base.Check(lispTree)){
         throw "Cannot begin parse";
     }
@@ -175,5 +181,32 @@ function CompileAndRun(main){
         }
     );
 }
-CompileAndRun("Main");
+
+function CreateUI(){
+    var textarea = document.createElement('textarea');
+    document.body.appendChild(textarea);
+    textarea.value = lispProgram;
+    textarea.rows = 15;
+    textarea.cols = 60;
+    textarea.onkeydown = (e)=> {
+        if (e.key == "Tab") {
+            e.preventDefault();
+        
+            const start = textarea.selectionStart;
+            const end = textarea.selectionEnd;
+        
+            textarea.value = textarea.value.substring(0, start) + "     " + textarea.value.substring(end);
+        
+            textarea.selectionStart = textarea.selectionEnd = start + 4;
+        }
+    }
+
+    var runbutton = document.createElement('button');
+    document.body.appendChild(runbutton);
+    runbutton.innerHTML = 'run';
+    runbutton.onclick = ()=>{CompileAndRun('Main', textarea.value)}
+}
+
+CreateUI();
+CompileAndRun("Main", lispProgram);
 

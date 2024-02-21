@@ -20,6 +20,15 @@ function EmitFunction(functionFinder, f){
         wasm.push(Opcode.call, ...unsignedLEB128(functionFinder[call.name].id));
     }
 
+    function EmitArithmenticOperator(expression, op){
+        for(var i=0;i<expression.expressions.length;i++){
+            EmitExpression(expression.expressions[i]);
+            if(i>0){
+                wasm.push(op);
+            }
+        }
+    }
+
     function EmitExpression(expression){
         if(expression.type == 'Varname'){
             wasm.push(Opcode.get_local, variables[expression.value].id);
@@ -28,12 +37,16 @@ function EmitFunction(functionFinder, f){
             wasm.push(Opcode.i32_const, ...signedLEB128(expression.value));
         }
         else if(expression.type == '+'){
-            for(var i=0;i<expression.expressions.length;i++){
-                EmitExpression(expression.expressions[i]);
-                if(i>0){
-                    wasm.push(Opcode.i32_add);
-                }
-            }
+            EmitArithmenticOperator(expression, Opcode.i32_add);
+        }
+        else if(expression.type == '*'){
+            EmitArithmenticOperator(expression, Opcode.i32_mul);
+        }
+        else if(expression.type == '/'){
+            EmitArithmenticOperator(expression, Opcode.i32_div);
+        }
+        else if(expression.type == '-'){
+            EmitArithmenticOperator(expression, Opcode.i32_sub);
         }
         else if(expression.type == 'call'){
             EmitCall(expression);
