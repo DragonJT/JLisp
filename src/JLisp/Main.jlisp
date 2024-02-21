@@ -1,13 +1,11 @@
 (import void PrintInt (int i) "console.log(i);")
 
 (int Test (int x int y) 
-    (int)
     (return (* x y))
 )
 
 (export int Main ()
-    (int x)
-    (= x (Test 4 5))
+    (var x (Test 4 5))
     (PrintInt 45) 
     (return x) 
 )

@@ -1,16 +1,18 @@
 function EmitFunction(functionFinder, f){
     var wasm = [];
-    var i32Count = f.int.variables.length;
-
+    var i32Count = 0;
     var variables = {};
     var id = 0;
     for(var v of f.parameters){
         variables[v.name]= {id};
         id++;
     }
-    for(var v of f.int.variables){
-        variables[v] = {id};
-        id++;
+    for(var s of f.body){
+        if(s.type == 'var'){
+            variables[s.name] = {id};
+            i32Count++;
+            id++;
+        }
     }
 
     function EmitCall(call){
@@ -21,8 +23,8 @@ function EmitFunction(functionFinder, f){
     }
 
     function EmitArithmenticOperator(expression, op){
-        for(var i=0;i<expression.expressions.length;i++){
-            EmitExpression(expression.expressions[i]);
+        for(var i=0;i<expression.values.length;i++){
+            EmitExpression(expression.values[i]);
             if(i>0){
                 wasm.push(op);
             }
@@ -58,17 +60,21 @@ function EmitFunction(functionFinder, f){
 
     function EmitStatement(statement){
         if(statement.type == '='){
-            EmitExpression(statement.expression);
+            EmitExpression(statement.value);
             wasm.push(Opcode.set_local, variables[statement.name].id);
         }
         else if(statement.type == 'return'){
-            if(statement.expressions.length == 1){
-                EmitExpression(statement.expressions[0]);
+            if(statement.values.length == 1){
+                EmitExpression(statement.values[0]);
             }
             wasm.push(Opcode.return);
         }
         else if(statement.type == 'call'){
             EmitCall(statement);
+        }
+        else if(statement.type == 'var'){
+            EmitExpression(statement.value);
+            wasm.push(Opcode.set_local, variables[statement.name].id);
         }
         else{
             throw "Unexpected statement: "+JSON.stringify(statement);

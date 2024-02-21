@@ -9,13 +9,11 @@
   var lispProgram = `(import void PrintInt (int i) "console.log(i);")
 
 (int Test (int x int y) 
-    (int)
     (return (* x y))
 )
 
 (export int Main ()
-    (int x)
-    (= x (Test 4 5))
+    (var x (Test 4 5))
     (PrintInt 45) 
     (return x) 
 )`;
@@ -450,36 +448,35 @@ const memoryImport = [
 
     var expression = new Or();
 
-    var add = new Obj('+', [new Literal('+')], new Params('expressions', expression, 2));
+    var add = new Obj('+', [new Literal('+')], new Params('values', expression, 2));
 
-    var mul = new Obj('*', [new Literal('*')], new Params('expressions', expression, 2));
+    var mul = new Obj('*', [new Literal('*')], new Params('values', expression, 2));
 
-    var div = new Obj('/', [new Literal('/')], new Params('expressions', expression, 2));
+    var div = new Obj('/', [new Literal('/')], new Params('values', expression, 2));
 
-    var sub = new Obj('-', [new Literal('-')], new Params('expressions', expression, 2));
+    var sub = new Obj('-', [new Literal('-')], new Params('values', expression, 2));
 
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
     expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, call]);
 
-    var _return = new Obj('return', [new Literal('return')], new Params('expressions', expression, 0, 1));
+    var _return = new Obj('return', [new Literal('return')], new Params('values', expression, 0, 1));
+
+    var _var = new Obj('var', [new Literal('var'), ['name', new Varname()], ['value', expression]]);
 
     var assign = new Obj('=', [
         new Literal('='),
         ['name', new Varname()],
-        ['expression', expression]]);
+        ['value', expression]]);
 
-    var body = new Or([_return, assign, call]);
+    var body = new Or([_return, assign, _var, call]);
 
     var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
-
-    var int = new Obj('int', [new Literal('int')], new Params('variables', new Varname()));
 
     var fn = new Obj('fn', [
         ['returnType', new Varname()],
         ['name', new Varname()], 
-        ['parameters', parameters],
-        ['int', int]
+        ['parameters', parameters]
         ], 
         new Params('body', body));
 
@@ -487,8 +484,7 @@ const memoryImport = [
         new Literal('export'),
         ['returnType', new Varname()],
         ['name', new Varname()], 
-        ['parameters', parameters],
-        ['int', int]
+        ['parameters', parameters]
         ], 
         new Params('body', body));
 
@@ -582,17 +578,19 @@ const memoryImport = [
     function EmitCodeSection(){
 function EmitFunction(functionFinder, f){
     var wasm = [];
-    var i32Count = f.int.variables.length;
-
+    var i32Count = 0;
     var variables = {};
     var id = 0;
     for(var v of f.parameters){
         variables[v.name]= {id};
         id++;
     }
-    for(var v of f.int.variables){
-        variables[v] = {id};
-        id++;
+    for(var s of f.body){
+        if(s.type == 'var'){
+            variables[s.name] = {id};
+            i32Count++;
+            id++;
+        }
     }
 
     function EmitCall(call){
@@ -603,8 +601,8 @@ function EmitFunction(functionFinder, f){
     }
 
     function EmitArithmenticOperator(expression, op){
-        for(var i=0;i<expression.expressions.length;i++){
-            EmitExpression(expression.expressions[i]);
+        for(var i=0;i<expression.values.length;i++){
+            EmitExpression(expression.values[i]);
             if(i>0){
                 wasm.push(op);
             }
@@ -640,17 +638,21 @@ function EmitFunction(functionFinder, f){
 
     function EmitStatement(statement){
         if(statement.type == '='){
-            EmitExpression(statement.expression);
+            EmitExpression(statement.value);
             wasm.push(Opcode.set_local, variables[statement.name].id);
         }
         else if(statement.type == 'return'){
-            if(statement.expressions.length == 1){
-                EmitExpression(statement.expressions[0]);
+            if(statement.values.length == 1){
+                EmitExpression(statement.values[0]);
             }
             wasm.push(Opcode.return);
         }
         else if(statement.type == 'call'){
             EmitCall(statement);
+        }
+        else if(statement.type == 'var'){
+            EmitExpression(statement.value);
+            wasm.push(Opcode.set_local, variables[statement.name].id);
         }
         else{
             throw "Unexpected statement: "+JSON.stringify(statement);

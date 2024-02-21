@@ -7,36 +7,35 @@ function CompileAndRun(main, code){
 
     var expression = new Or();
 
-    var add = new Obj('+', [new Literal('+')], new Params('expressions', expression, 2));
+    var add = new Obj('+', [new Literal('+')], new Params('values', expression, 2));
 
-    var mul = new Obj('*', [new Literal('*')], new Params('expressions', expression, 2));
+    var mul = new Obj('*', [new Literal('*')], new Params('values', expression, 2));
 
-    var div = new Obj('/', [new Literal('/')], new Params('expressions', expression, 2));
+    var div = new Obj('/', [new Literal('/')], new Params('values', expression, 2));
 
-    var sub = new Obj('-', [new Literal('-')], new Params('expressions', expression, 2));
+    var sub = new Obj('-', [new Literal('-')], new Params('values', expression, 2));
 
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
     expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, call]);
 
-    var _return = new Obj('return', [new Literal('return')], new Params('expressions', expression, 0, 1));
+    var _return = new Obj('return', [new Literal('return')], new Params('values', expression, 0, 1));
+
+    var _var = new Obj('var', [new Literal('var'), ['name', new Varname()], ['value', expression]]);
 
     var assign = new Obj('=', [
         new Literal('='),
         ['name', new Varname()],
-        ['expression', expression]]);
+        ['value', expression]]);
 
-    var body = new Or([_return, assign, call]);
+    var body = new Or([_return, assign, _var, call]);
 
     var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
-
-    var int = new Obj('int', [new Literal('int')], new Params('variables', new Varname()));
 
     var fn = new Obj('fn', [
         ['returnType', new Varname()],
         ['name', new Varname()], 
-        ['parameters', parameters],
-        ['int', int]
+        ['parameters', parameters]
         ], 
         new Params('body', body));
 
@@ -44,8 +43,7 @@ function CompileAndRun(main, code){
         new Literal('export'),
         ['returnType', new Varname()],
         ['name', new Varname()], 
-        ['parameters', parameters],
-        ['int', int]
+        ['parameters', parameters]
         ], 
         new Params('body', body));
 
