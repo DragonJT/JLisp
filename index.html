@@ -8,13 +8,18 @@
   <script>
   var lispProgram = `(import void PrintInt (int i) "console.log(i);")
 
+(int Test (int x int y) 
+    (int)
+    (return (+ x y))
+)
+
 (export int Main ()
     (int x y)
     (= y 4)
     (= x (+ 5 3))
     (PrintInt x)
-    (= x (+ x y))
-    (return x)
+    (PrintInt (Test x y))
+    (return (+ x 5))
 )
 `;
   
@@ -512,9 +517,12 @@ const memoryImport = [
     var exportFunctions = tree.values.filter(v=>v.type == 'exportFn');
     var functions = [...nonExportFunctions, ...exportFunctions];
     var allFunctions = [...importFunctions, ...functions];
+    var functionFinder = {};
 
     for(var i=0;i<allFunctions.length;i++){
-        allFunctions[i].id = i;
+        var f = allFunctions[i];
+        functionFinder[f.name] = f;
+        f.id = i;
     }
 
     function EmitTypeSection(){
@@ -558,7 +566,7 @@ const memoryImport = [
     }
     
     function EmitFuncSection(){
-        return createSection(Section.func, encodeVector(functions.map(f=>f.id)));
+        return createSection(Section.func, encodeVector(functions.map(f=>unsignedLEB128(f.id))));
     }
 
     function EmitExportSection(){
@@ -569,19 +577,18 @@ const memoryImport = [
     }
 
     function EmitCodeSection(){
-function EmitFunction(allFunctions, f){
+function EmitFunction(functionFinder, f){
     var wasm = [];
     var i32Count = f.int.variables.length;
 
-    var functions = {};
-    for(var f of allFunctions){
-        functions[f.name] = f;
-    }
-
-    var locals = {};
+    var variables = {};
     var id = 0;
+    for(var v of f.parameters){
+        variables[v.name]= {id};
+        id++;
+    }
     for(var v of f.int.variables){
-        locals[v] = {id};
+        variables[v] = {id};
         id++;
     }
 
@@ -589,12 +596,12 @@ function EmitFunction(allFunctions, f){
         for(var a of call.args){
             EmitExpression(a);
         }
-        wasm.push(Opcode.call, ...unsignedLEB128(functions[call.name].id));
+        wasm.push(Opcode.call, ...unsignedLEB128(functionFinder[call.name].id));
     }
 
     function EmitExpression(expression){
         if(expression.type == 'Varname'){
-            wasm.push(Opcode.get_local, locals[expression.value].id);
+            wasm.push(Opcode.get_local, variables[expression.value].id);
         }
         else if(expression.type == 'Int'){
             wasm.push(Opcode.i32_const, ...signedLEB128(expression.value));
@@ -618,7 +625,7 @@ function EmitFunction(allFunctions, f){
     function EmitStatement(statement){
         if(statement.type == '='){
             EmitExpression(statement.expression);
-            wasm.push(Opcode.set_local, locals[statement.name].id);
+            wasm.push(Opcode.set_local, variables[statement.name].id);
         }
         else if(statement.type == 'return'){
             if(statement.expressions.length == 1){
@@ -639,7 +646,7 @@ function EmitFunction(allFunctions, f){
     }
     return encodeVector([...encodeVector([encodeLocal(i32Count, Valtype.i32)]), ...wasm, Opcode.end])
 }
-        return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(allFunctions, f))));
+        return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(functionFinder, f))));
     }
 
     function ImportObject(){

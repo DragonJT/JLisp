@@ -1,16 +1,15 @@
-function EmitFunction(allFunctions, f){
+function EmitFunction(functionFinder, f){
     var wasm = [];
     var i32Count = f.int.variables.length;
 
-    var functions = {};
-    for(var f of allFunctions){
-        functions[f.name] = f;
-    }
-
-    var locals = {};
+    var variables = {};
     var id = 0;
+    for(var v of f.parameters){
+        variables[v.name]= {id};
+        id++;
+    }
     for(var v of f.int.variables){
-        locals[v] = {id};
+        variables[v] = {id};
         id++;
     }
 
@@ -18,12 +17,12 @@ function EmitFunction(allFunctions, f){
         for(var a of call.args){
             EmitExpression(a);
         }
-        wasm.push(Opcode.call, ...unsignedLEB128(functions[call.name].id));
+        wasm.push(Opcode.call, ...unsignedLEB128(functionFinder[call.name].id));
     }
 
     function EmitExpression(expression){
         if(expression.type == 'Varname'){
-            wasm.push(Opcode.get_local, locals[expression.value].id);
+            wasm.push(Opcode.get_local, variables[expression.value].id);
         }
         else if(expression.type == 'Int'){
             wasm.push(Opcode.i32_const, ...signedLEB128(expression.value));
@@ -47,7 +46,7 @@ function EmitFunction(allFunctions, f){
     function EmitStatement(statement){
         if(statement.type == '='){
             EmitExpression(statement.expression);
-            wasm.push(Opcode.set_local, locals[statement.name].id);
+            wasm.push(Opcode.set_local, variables[statement.name].id);
         }
         else if(statement.type == 'return'){
             if(statement.expressions.length == 1){

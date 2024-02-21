@@ -71,9 +71,12 @@ function CompileAndRun(main){
     var exportFunctions = tree.values.filter(v=>v.type == 'exportFn');
     var functions = [...nonExportFunctions, ...exportFunctions];
     var allFunctions = [...importFunctions, ...functions];
+    var functionFinder = {};
 
     for(var i=0;i<allFunctions.length;i++){
-        allFunctions[i].id = i;
+        var f = allFunctions[i];
+        functionFinder[f.name] = f;
+        f.id = i;
     }
 
     function EmitTypeSection(){
@@ -117,7 +120,7 @@ function CompileAndRun(main){
     }
     
     function EmitFuncSection(){
-        return createSection(Section.func, encodeVector(functions.map(f=>f.id)));
+        return createSection(Section.func, encodeVector(functions.map(f=>unsignedLEB128(f.id))));
     }
 
     function EmitExportSection(){
@@ -129,7 +132,7 @@ function CompileAndRun(main){
 
     function EmitCodeSection(){
 //#EmitFunction.js
-        return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(allFunctions, f))));
+        return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(functionFinder, f))));
     }
 
     function ImportObject(){
