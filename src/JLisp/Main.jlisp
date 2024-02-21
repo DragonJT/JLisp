@@ -1,11 +1,14 @@
 (import void PrintInt (int i) "console.log(i);")
 
+(import void PrintFloat (float f) "console.log(f);")
+
 (int Test (int x int y) 
     (return (* x y))
 )
 
 (export int Main ()
     (var i 0)
+    (PrintFloat (+ 2.2f 3.3f))
     (loop 
         (= i (+ i 2))
         (PrintInt i)

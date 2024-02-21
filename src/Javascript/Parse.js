@@ -5,6 +5,35 @@ function LispParser(code){
         return c>='0' && c<='9';
     }
 
+    function FindNumberType(value){
+        var dot = false;
+        var i = 1;
+        while(true){
+            if(!dot && value[i] == '.'){
+                dot = true;
+            }
+            else if(!IsDigit(value[i])){
+                break;
+            }
+            i++;
+        }
+        var textAtEnd = value.substring(i);
+        var number = parseFloat(value.substring(0, i));
+        if(textAtEnd == 'f'){
+            return ['float', number];
+        }
+        else if(textAtEnd == '' && dot){
+            return ['double', number];
+        }
+        else if(textAtEnd == '' && !dot){
+            return ['int', number];
+        }
+        else if(textAtEnd == 'l' && !dot){
+            return ['long', number];
+        }
+        throw "Unknown number type: "+value;
+    }
+
     function IsWhitespace(c){
         return c==' ' || c=='\t' || c=='\n' || c=='\r';
     }
@@ -49,7 +78,7 @@ function LispParser(code){
                     if(breakVarname){
                         var value = code.substring(start, index);
                         if(IsDigit(value[0])){
-                            result.push(['int', parseFloat(value)]);
+                            result.push(FindNumberType(value));
                         }
                         else{
                             result.push(['varname', value]);
@@ -102,6 +131,16 @@ class Varname{
 class Int{
     Check(obj){
         return (obj[0] == 'int');
+    }
+
+    Parse(obj){
+        return obj[1];
+    }
+}
+
+class Float{
+    Check(obj){
+        return (obj[0] == 'float');
     }
 
     Parse(obj){

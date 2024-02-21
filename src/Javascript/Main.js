@@ -21,7 +21,7 @@ function CompileAndRun(main, code){
 
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Int(), new String(), add, mul, div, sub, lt, gt, call]);
+    expression.Init([new Varname(), new Int(), new Float(), new String(), add, mul, div, sub, lt, gt, call]);
 
     var body = new Or();
 
