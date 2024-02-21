@@ -1,21 +1,38 @@
-function EmitFunction(f){
+function EmitFunction(tree, f){
     var wasm = [];
-    var i32Count = f.i32.variables.length;
+    var i32Count = f.int.variables.length;
+
+    var functions = {};
+    for(var f of tree.imports.body){
+        functions[f.name] = f;
+    }
+    for(var f of tree.nonExports.body){
+        functions[f.name] = f;
+    }
+    for(var f of tree.exports.body){
+        functions[f.name] = f;
+    }
+
     var locals = {};
     var id = 0;
-    for(var v of f.i32.variables){
+    for(var v of f.int.variables){
         locals[v] = {id};
         id++;
+    }
+
+    function EmitCall(call){
+        for(var a of call.args){
+            EmitExpression(a);
+        }
+        wasm.push(Opcode.call, ...unsignedLEB128(functions[call.name].id));
     }
 
     function EmitExpression(expression){
         if(expression.type == 'Varname'){
             wasm.push(Opcode.get_local, locals[expression.value].id);
-            return;
         }
         else if(expression.type == 'Int'){
             wasm.push(Opcode.i32_const, ...signedLEB128(expression.value));
-            return;
         }
         else if(expression.type == '+'){
             for(var i=0;i<expression.expressions.length;i++){
@@ -24,6 +41,9 @@ function EmitFunction(f){
                     wasm.push(Opcode.i32_add);
                 }
             }
+        }
+        else if(expression.type == 'call'){
+            EmitCall(expression);
         }
         else{
             throw "Unexpected expression: "+JSON.stringify(expression);
@@ -40,6 +60,9 @@ function EmitFunction(f){
                 EmitExpression(statement.expressions[0]);
             }
             wasm.push(Opcode.return);
+        }
+        else if(statement.type == 'call'){
+            EmitCall(statement);
         }
         else{
             throw "Unexpected statement: "+JSON.stringify(statement);

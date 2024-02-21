@@ -27,12 +27,12 @@ function LispParser(code){
                 index++;
             }
             else if(code[index] == '"'){
-                var start = index;
                 index++;
+                var start = index;
                 while(true){
                     if(code[index] == '"'){
-                        index++;
                         result.push(['string', code.substring(start, index)]);
+                        index++;
                         break;
                     }
                     index++;
@@ -160,10 +160,10 @@ class ArrayMultipleOf2{
         if((obj.length-1)%2 == 0){
             var result = [];
             for(var i=1;i<obj.length;i+=2){
-                var obj = {};
-                obj[this.item1[0]] = this.item1[1].Parse(obj[i]);
-                obj[this.item1[0]] = this.item2[1].Parse(obj[i+1]);
-                result.push(obj);
+                var resultObj = {};
+                resultObj[this.item1[0]] = this.item1[1].Parse(obj[i]);
+                resultObj[this.item2[0]] = this.item2[1].Parse(obj[i+1]);
+                result.push(resultObj);
             }
             return result;
         }

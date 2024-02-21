@@ -9,7 +9,9 @@ function CompileAndRun(main){
 
     var add = new Obj('+', [new Literal('+')], new Params('expressions', expression, 2));
 
-    expression.Init([new Varname(), new Int(), new String(), add]);
+    var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
+
+    expression.Init([new Varname(), new Int(), new String(), add, call]);
 
     var _return = new Obj('return', [new Literal('return')], new Params('expressions', expression, 0, 1));
 
@@ -18,17 +20,17 @@ function CompileAndRun(main){
         ['name', new Varname()],
         ['expression', expression]]);
 
-    var body = new Or([_return, assign]);
+    var body = new Or([_return, assign, call]);
 
     var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
 
-    var i32 = new Obj('i32', [new Literal('i32')], new Params('variables', new Varname()));
+    var int = new Obj('int', [new Literal('int')], new Params('variables', new Varname()));
 
     var fn = new Obj('fn', [
         ['returnType', new Varname()],
         ['name', new Varname()], 
         ['parameters', parameters],
-        ['i32', i32]
+        ['int', int]
         ], 
         new Params('body', body));
 
@@ -47,7 +49,11 @@ function CompileAndRun(main){
 
     var base = new Obj('base', [['imports',imports],['nonExports', nonExports],['exports', exports]]);
 
-    var tree = base.Parse(LispParser(lispProgram));
+    var lispTree = LispParser(lispProgram);
+    if(!base.Check(lispTree)){
+        throw "Cannot begin parse";
+    }
+    var tree = base.Parse(lispTree);
 
     if(errors.length>0){
         for(var e of errors){
@@ -128,7 +134,7 @@ function CompileAndRun(main){
     function EmitCodeSection(){
 //#EmitFunction.js
         return createSection(Section.code, encodeVector(
-            [...tree.nonExports.body.map(f=>EmitFunction(f)), ...tree.exports.body.map(f=>EmitFunction(f))]));
+            [...tree.nonExports.body.map(f=>EmitFunction(tree, f)), ...tree.exports.body.map(f=>EmitFunction(tree, f))]));
     }
 
     function ImportObject(){
@@ -145,7 +151,7 @@ function CompileAndRun(main){
             code+=f.javascript;
             code+="};\n";
         }
-        code+="return importObject;\n"
+        code+="return importObject;\n";
         return new Function('exports', code)(exports);
     }
 
