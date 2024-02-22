@@ -5,35 +5,6 @@ function LispParser(code){
         return c>='0' && c<='9';
     }
 
-    function FindNumberType(value){
-        var dot = false;
-        var i = 1;
-        while(true){
-            if(!dot && value[i] == '.'){
-                dot = true;
-            }
-            else if(!IsDigit(value[i])){
-                break;
-            }
-            i++;
-        }
-        var textAtEnd = value.substring(i);
-        var number = parseFloat(value.substring(0, i));
-        if(textAtEnd == 'f'){
-            return ['float', number];
-        }
-        else if(textAtEnd == '' && dot){
-            return ['double', number];
-        }
-        else if(textAtEnd == '' && !dot){
-            return ['int', number];
-        }
-        else if(textAtEnd == 'l' && !dot){
-            return ['long', number];
-        }
-        throw "Unknown number type: "+value;
-    }
-
     function IsWhitespace(c){
         return c==' ' || c=='\t' || c=='\n' || c=='\r';
     }
@@ -78,7 +49,7 @@ function LispParser(code){
                     if(breakVarname){
                         var value = code.substring(start, index);
                         if(IsDigit(value[0])){
-                            result.push(FindNumberType(value));
+                            result.push(['number', value]);
                         }
                         else{
                             result.push(['varname', value]);
@@ -128,19 +99,9 @@ class Varname{
     }
 }
 
-class Int{
+class Number{
     Check(obj){
-        return (obj[0] == 'int');
-    }
-
-    Parse(obj){
-        return obj[1];
-    }
-}
-
-class Float{
-    Check(obj){
-        return (obj[0] == 'float');
+        return (obj[0] == 'number');
     }
 
     Parse(obj){
@@ -177,38 +138,6 @@ class Or{
             }
         }
         errors.push("not found branch: "+JSON.stringify(this.branches.map(o=>o.type))+" got: "+JSON.stringify(obj));
-    }
-}
-
-class ArrayMultipleOf2{
-    constructor(item1, item2){
-        this.IsArrayMultipleOf2 = true;
-        this.Init(item1, item2);
-    }
-
-    Init(item1, item2){
-        this.item1 = item1;
-        this.item2 = item2;
-    }
-
-    Check(obj){
-        return (obj[0] == 'obj');
-    }
-
-    Parse(obj){
-        if((obj.length-1)%2 == 0){
-            var result = [];
-            for(var i=1;i<obj.length;i+=2){
-                var resultObj = {};
-                resultObj[this.item1[0]] = this.item1[1].Parse(obj[i]);
-                resultObj[this.item2[0]] = this.item2[1].Parse(obj[i+1]);
-                result.push(resultObj);
-            }
-            return result;
-        }
-        else{
-            errors.push('Expecting obj length to be multiple of 2: '+JSON.stringify(obj));
-        }
     }
 }
 

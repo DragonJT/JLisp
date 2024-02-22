@@ -6,26 +6,15 @@
 </head>
 <body>
   <script>
-  var lispProgram = `(import void PrintInt (int i) "console.log(i);")
-
-(import void PrintFloat (float f) "console.log(f);")
-
-(int Test (int x int y) 
+  var lispProgram = `
+(fn Main ()
+    (var x (+ 10 5))
+    (var y (- 8 2 3))  
+    (console.log (+ "hello world" y)) 
     (return (* x y))
 )
 
-(export int Main ()
-    (var i 0)
-    (PrintFloat (+ 2.2f 3.3f))
-    (loop 
-        (= i (+ i 2))
-        (PrintInt i)
-        (if (> i 10) 
-            (break)
-        )
-    )
-    (return i)
-)`;
+(return (Main))`;
   
 
 function CompileAndRun(main, code){
@@ -34,35 +23,6 @@ function LispParser(code){
 
     function IsDigit(c){
         return c>='0' && c<='9';
-    }
-
-    function FindNumberType(value){
-        var dot = false;
-        var i = 1;
-        while(true){
-            if(!dot && value[i] == '.'){
-                dot = true;
-            }
-            else if(!IsDigit(value[i])){
-                break;
-            }
-            i++;
-        }
-        var textAtEnd = value.substring(i);
-        var number = parseFloat(value.substring(0, i));
-        if(textAtEnd == 'f'){
-            return ['float', number];
-        }
-        else if(textAtEnd == '' && dot){
-            return ['double', number];
-        }
-        else if(textAtEnd == '' && !dot){
-            return ['int', number];
-        }
-        else if(textAtEnd == 'l' && !dot){
-            return ['long', number];
-        }
-        throw "Unknown number type: "+value;
     }
 
     function IsWhitespace(c){
@@ -109,7 +69,7 @@ function LispParser(code){
                     if(breakVarname){
                         var value = code.substring(start, index);
                         if(IsDigit(value[0])){
-                            result.push(FindNumberType(value));
+                            result.push(['number', value]);
                         }
                         else{
                             result.push(['varname', value]);
@@ -159,19 +119,9 @@ class Varname{
     }
 }
 
-class Int{
+class Number{
     Check(obj){
-        return (obj[0] == 'int');
-    }
-
-    Parse(obj){
-        return obj[1];
-    }
-}
-
-class Float{
-    Check(obj){
-        return (obj[0] == 'float');
+        return (obj[0] == 'number');
     }
 
     Parse(obj){
@@ -208,38 +158,6 @@ class Or{
             }
         }
         errors.push("not found branch: "+JSON.stringify(this.branches.map(o=>o.type))+" got: "+JSON.stringify(obj));
-    }
-}
-
-class ArrayMultipleOf2{
-    constructor(item1, item2){
-        this.IsArrayMultipleOf2 = true;
-        this.Init(item1, item2);
-    }
-
-    Init(item1, item2){
-        this.item1 = item1;
-        this.item2 = item2;
-    }
-
-    Check(obj){
-        return (obj[0] == 'obj');
-    }
-
-    Parse(obj){
-        if((obj.length-1)%2 == 0){
-            var result = [];
-            for(var i=1;i<obj.length;i+=2){
-                var resultObj = {};
-                resultObj[this.item1[0]] = this.item1[1].Parse(obj[i]);
-                resultObj[this.item2[0]] = this.item2[1].Parse(obj[i+1]);
-                result.push(resultObj);
-            }
-            return result;
-        }
-        else{
-            errors.push('Expecting obj length to be multiple of 2: '+JSON.stringify(obj));
-        }
     }
 }
 
@@ -325,174 +243,104 @@ class Obj{
     }
 }
 
-//copied quite a lot from https://github.com/ColinEberhardt/chasm
+function EmitJavascript(tree){
 
-// https://webassembly.github.io/spec/core/binary/instructions.html
-// https://pengowray.github.io/wasm-ops/
-const Opcode = {
-    block: 0x02,
-    loop: 0x03,
-    br: 0x0c,
-    br_if: 0x0d,
-    if: 0x04,
-    else: 0x05,
-    end: 0x0b,
-    call: 0x10,
-    get_local: 0x20,
-    set_local: 0x21,
-    i32_store_8: 0x3a,
-    i32_store: 0x36,
-    i32_const: 0x41,
-    f32_const: 0x43,
-    i32_eqz: 0x45,
-    i32_eq: 0x46,
-    f32_eq: 0x5b,
-    f32_lt: 0x5d,
-    f32_gt: 0x5e,
-    i32_and: 0x71,
-    f32_add: 0x92,
-    f32_sub: 0x93,
-    f32_mul: 0x94,
-    f32_div: 0x95,
-    f32_neg: 0x8c,
-    i32_trunc_f32_s: 0xa8,
-    i32_load: 0x28,
-    f32_load: 0x2a,
-    f32_store: 0x38,
-    i32_mul: 0x6c,
-    i32_div: 0x6d,
-    i32_add: 0x6a,
-    i32_sub: 0x6b,
-    i32_lt: 0x48,
-    i32_gt: 0x4a,
-    f32_convert_i32_s: 0xb2,
-    return: 0x0f,
-};
-
-// https://webassembly.github.io/spec/core/binary/types.html
-const Valtype = {
-    i32: 0x7f,
-    f32: 0x7d
-};
-
-const ieee754 = (n) => {
-    var data = new Float32Array([n]);
-    var buffer = new ArrayBuffer(data.byteLength);
-    var floatView = new Float32Array(buffer).set(data);
-    return new Uint8Array(buffer);
-};
-
-const encodeString = (str) => [
-    str.length,
-    ...str.split("").map(s => s.charCodeAt(0))
-];
-
-const signedLEB128 = (n) => {
-    const buffer = [];
-    let more = true;
-    const isNegative = n < 0;
-    const bitCount = Math.ceil(Math.log2(Math.abs(n))) + 1;
-    while (more) {
-        let byte = n & 0x7f;
-        n >>= 7;
-        if (isNegative) {
-            n = n | -(1 << (bitCount - 8));
+    function EmitArithmeticOperator(expression, op){
+        var result = '('
+        for(var i=0;i<expression.values.length;i++){
+            result+=EmitExpression(expression.values[i]);
+            if(i<expression.values.length-1){
+                result+=op;
+            }
         }
-        if ((n === 0 && (byte & 0x40) === 0) || (n === -1 && (byte & 0x40) !== 0x40)) {
-            more = false;
-        } else {
-            byte |= 0x80;
-        }
-        buffer.push(byte);
+        return result+')';
     }
-    return buffer;
-};
 
-const unsignedLEB128 = (n) => {
-    const buffer = [];
-    do {
-        let byte = n & 0x7f;
-        n >>>= 7;
-        if (n !== 0) {
-            byte |= 0x80;
+    function EmitCall(call){
+        var result = call.name+'(';
+        for(var i=0;i<call.args.length;i++){
+            result+=EmitExpression(call.args[i]);
+            if(i<call.args.length-1){
+                result+=',';
+            }
         }
-        buffer.push(byte);
-    } while (n !== 0);
-    return buffer;
-};
+        return result+')';
+    }
 
-// https://webassembly.github.io/spec/core/binary/types.html#binary-blocktype
-// https://github.com/WebAssembly/design/blob/main/BinaryEncoding.md#value_type
-const Blocktype = {
-    void: 0x40,
-    i32: 0x7f,
+    function EmitExpression(expression){
+        if(expression.type == 'Number'){
+            return expression.value;
+        }
+        else if(expression.type == 'Varname'){
+            return expression.value;
+        }
+        else if(expression.type == 'String'){
+            return '"'+expression.value+'"';
+        }
+        else if(expression.type == 'call'){
+            return EmitCall(expression);
+        }
+        else if(expression.type == '+'){
+            return EmitArithmeticOperator(expression, '+');
+        }
+        else if(expression.type == '-'){
+            return EmitArithmeticOperator(expression, '-');
+        }
+        else if(expression.type == '*'){
+            return EmitArithmeticOperator(expression, '*');
+        }
+        else if(expression.type == '/'){
+            return EmitArithmeticOperator(expression, '/');
+        }
+        else{
+            throw 'Unexpected expression: '+JSON.stringify(expression);
+        }
+    }
+
+    function EmitParameters(parameters){
+        var result = '(';
+        for(var i=0;i<parameters.values.length;i++){
+            result+=parameters.values[i];
+            if(i<parameters.values.length-1){
+                result+=',';
+            }
+        }
+        return result+')';
+    }
+
+    function EmitStatement(statement){
+        if(statement.type == 'fn'){
+            return 'function '+statement.name+EmitParameters(statement.parameters)+'{\n'+ EmitBody(statement.body)+'}\n';
+        }
+        else if(statement.type == 'return'){
+            var result='return';
+            if(statement.values.length == 1){
+                result+= ' '+EmitExpression(statement.values[0]);
+            }
+            result+=';\n';
+            return result;
+        }
+        else if(statement.type == 'var'){
+            return 'var '+statement.name+' = '+EmitExpression(statement.value)+';\n';
+        }
+        else if(statement.type == 'call'){
+            return EmitCall(statement)+';\n';
+        }
+        else{
+            throw 'Unexpected statement: '+JSON.stringify(statement);
+        }
+    }
+
+    function EmitBody(body){
+        var result = '';
+        for(var s of body){
+            result+=EmitStatement(s);
+        }
+        return result;
+    }
+
+    return EmitBody(tree.values);
 }
-
-const flatten = (arr) => [].concat.apply([], arr);
-
-// https://webassembly.github.io/spec/core/binary/modules.html#sections
-const Section = {
-    custom: 0,
-    type: 1,
-    import: 2,
-    func: 3,
-    table: 4,
-    memory: 5,
-    global: 6,
-    export: 7,
-    start: 8,
-    element: 9,
-    code: 10,
-    data: 11
-};
-
-// http://webassembly.github.io/spec/core/binary/modules.html#export-section
-const ExportType = {
-    func: 0x00,
-    table: 0x01,
-    mem: 0x02,
-    global: 0x03
-}
-
-// http://webassembly.github.io/spec/core/binary/types.html#function-types
-const functionType = 0x60;
-
-const emptyArray = 0x0;
-
-// https://webassembly.github.io/spec/core/binary/modules.html#binary-module
-const magicModuleHeader = [0x00, 0x61, 0x73, 0x6d];
-const moduleVersion = [0x01, 0x00, 0x00, 0x00];
-
-// https://webassembly.github.io/spec/core/binary/conventions.html#binary-vec
-// Vectors are encoded with their length followed by their element sequence
-const encodeVector = (data) => [
-    ...unsignedLEB128(data.length),
-    ...flatten(data)
-];
-
-// https://webassembly.github.io/spec/core/binary/modules.html#code-section
-const encodeLocal = (count, valtype) => [
-    ...unsignedLEB128(count),
-    valtype
-];
-
-// https://webassembly.github.io/spec/core/binary/modules.html#sections
-// sections are encoded by their type followed by their vector contents
-const createSection = (sectionType, data) => [
-    sectionType,
-    ...encodeVector(data)
-];
-
-const memoryImport = [
-    ...encodeString("env"),
-    ...encodeString("memory"),
-    ExportType.mem,
-    /* limits https://webassembly.github.io/spec/core/binary/types.html#limits -
-      indicates a min memory size of one page */
-    0x00,
-    unsignedLEB128(10),
-  ];
-    var errors = [];
 
     var expression = new Or();
 
@@ -510,7 +358,7 @@ const memoryImport = [
 
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Int(), new Float(), new String(), add, mul, div, sub, lt, gt, call]);
+    expression.Init([new Varname(), new Number(), new String(), add, mul, div, sub, lt, gt, call]);
 
     var body = new Or();
 
@@ -529,381 +377,27 @@ const memoryImport = [
         ['name', new Varname()],
         ['value', expression]]);
 
-    body.Init([_return, assign, _if, _var, loop, _break, call]);
-
-    var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
+    var parameters = new Obj('type', [],new Params('values', new Varname()));
 
     var fn = new Obj('fn', [
-        ['returnType', new Varname()],
+        new Literal('fn'),
         ['name', new Varname()], 
         ['parameters', parameters]
         ], 
         new Params('body', body));
 
-    var exportFn = new Obj('exportFn', [
-        new Literal('export'),
-        ['returnType', new Varname()],
-        ['name', new Varname()], 
-        ['parameters', parameters]
-        ], 
-        new Params('body', body));
+    body.Init([fn, _return, assign, _if, _var, loop, _break, call]);
 
-    var importFn = new Obj('importFn', [
-        new Literal('import'),
-        ['returnType', new Varname()],
-        ['name', new Varname()], 
-        ['parameters', parameters],
-        ['javascript', new String()]
-        ]);
-
-    var base = new Obj('base', [], new Params('values', new Or([importFn, exportFn, fn])));
+    var base = new Obj('base', [], new Params('values', body));
 
     var lispTree = LispParser(code);
     if(!base.Check(lispTree)){
-        throw "Cannot begin parse";
+        throw "Parser failed at start";
     }
     var tree = base.Parse(lispTree);
-
-    if(errors.length>0){
-        for(var e of errors){
-            console.log(e);
-        }
-        throw "Parsing errors";
-    }
-
-    var importFunctions = tree.values.filter(v=>v.type == 'importFn');
-    var nonExportFunctions = tree.values.filter(v=>v.type == 'fn');
-    var exportFunctions = tree.values.filter(v=>v.type == 'exportFn');
-    var functions = [...nonExportFunctions, ...exportFunctions];
-    var allFunctions = [...importFunctions, ...functions];
-    var functionFinder = {};
-
-    for(var i=0;i<allFunctions.length;i++){
-        var f = allFunctions[i];
-        functionFinder[f.name] = f;
-        f.id = i;
-    }
-
-    function EmitTypeSection(){
-        function GetValtype(typeName){
-            switch(typeName){
-                case 'float': return Valtype.f32;
-                case 'int': return Valtype.i32;
-                default: throw "Unexpected valtype: "+typeName;
-            }
-        }
-    
-        function GetReturnArray(returnType){
-            if(returnType == 'void')
-                return [];
-            else{
-                return [GetValtype(returnType)];
-            }
-        }
-
-        function EmitTypes(functions){
-            return functions.map(f=>[
-                functionType,
-                ...encodeVector(f.parameters.map(p=>GetValtype(p.type))),
-                ...encodeVector(GetReturnArray(f.returnType)),
-            ]);
-        }
-        return createSection(Section.type, encodeVector(EmitTypes(allFunctions)));
-    }
-
-    function EmitImportSection(){
-        function EmitImportFunctions(){
-            return importFunctions.map((f,i)=>[
-                ...encodeString("env"),
-                ...encodeString(f.name),
-                ExportType.func,
-                ...unsignedLEB128(i)
-            ]);
-        }
-
-        return createSection(Section.import, encodeVector([...EmitImportFunctions(), memoryImport]));
-    }
-    
-    function EmitFuncSection(){
-        return createSection(Section.func, encodeVector(functions.map(f=>unsignedLEB128(f.id))));
-    }
-
-    function EmitExportSection(){
-       return createSection(
-            Section.export,
-            encodeVector(exportFunctions.map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
-        );
-    }
-
-    function EmitCodeSection(){
-function EmitFunction(functionFinder, f){
-    var wasm = [];
-    var i32Count = 0;
-    var variables = {};
-    var id = 0;
-    for(var v of f.parameters){
-        variables[v.name]= {id, type:v.type};
-        id++;
-    }
-
-    function GetFunction(name){
-        var f = functionFinder[name];
-        if(name == undefined){
-            throw "cant find function: "+name;
-        }
-        return f;
-    }
-
-    function GetVar(name){
-        var v = variables[name];
-        if(v==undefined){
-            throw "cant find variable: "+name;
-        }
-        return v;
-    }
-
-    function FindLocalsInBody(body){
-        for(var s of body){
-            if(s.type == 'var'){
-                var type = GetTypeFromExpression(s.value);
-                variables[s.name] = {id, type};
-                i32Count++;
-                id++;
-            }
-            else if(s.type == 'if'){
-                FindLocalsInBody(s.body);
-            }
-            else if(s.type == 'loop'){
-                FindLocalsInBody(s.body);
-            }
-        }
-    }
-    FindLocalsInBody(f.body);
-
-    var breakDepth = 0;
-
-    function EmitCall(call){
-        var func = GetFunction(call.name);
-
-        if(func.parameters.length != call.args.length){
-            throw "function "+func.name+" expects "+func.parameters.length+" args. got: "+call.args.length; 
-        }
-        for(var i=0;i<call.args.length;i++){
-            var arg = call.args[i];
-            var type = GetTypeFromExpression(arg);
-            if(type != func.parameters[i].type){
-                throw "function "+func.name+" expects argument "+i+" of type "+func.parameters[i].type+". got: "+type;
-            }
-        }
-
-        for(var arg of call.args){
-            EmitExpression(arg);
-        }
-        wasm.push(Opcode.call, ...unsignedLEB128(func.id));
-    }
-
-    function GetTypeFromExpression(expression){
-        if(expression.type == 'Varname'){
-            return GetVar(expression.value).type; 
-        }
-        else if(expression.type == 'Int'){
-            return 'int';
-        }
-        else if(expression.type == 'Float'){
-            return 'float';
-        }
-        else if(expression.type == '+'){
-            return GetTypeFromExpressions(expression.values);
-        }
-        else if(expression.type == '*'){
-            return GetTypeFromExpressions(expression.values);
-        }
-        else if(expression.type == '/'){
-            return GetTypeFromExpressions(expression.values);
-        }
-        else if(expression.type == '-'){
-            return GetTypeFromExpressions(expression.values);
-        }
-        else if(expression.type == '<'){
-            return 'bool';
-        }
-        else if(expression.type == '>'){
-            return 'bool';
-        }
-        else if(expression.type == 'call'){
-            return GetFunction(expression.name).returnType;
-        }
-        else{
-            throw "Cant get type from: "+JSON.stringify(expression);
-        }
-    }
-
-    function GetTypeFromExpressions(expressions){
-        var type = GetTypeFromExpression(expressions[0]);
-        for(var i=1;i<expressions.length;i++){
-            var nextType = GetTypeFromExpression(expressions[i]);
-            if(nextType != type){
-                throw "Expecting all types to be the same: "+JSON.stringify(expressions);
-            }
-        }
-        return type;
-    }
-
-    function EmitOperatorNumbersInBoolOut(expression, op){
-        var stackSize = 0;
-        for(var i=0;i<expression.values.length-1;i++){
-            EmitExpression(expression.values[i]);
-            EmitExpression(expression.values[i+1]);
-            wasm.push(op);
-            stackSize++;
-        }
-        while(stackSize>1){
-            wasm.push(Opcode.i32_and);
-            stackSize--;
-        }
-    }
-
-    function EmitArithmenticOperator(expression, ops){
-        var type = GetTypeFromExpressions(expression.values);
-        var op = ops[type];
-        for(var i=0;i<expression.values.length;i++){
-            EmitExpression(expression.values[i]);
-            if(i>0){
-                wasm.push(op);
-            }
-        }
-    }
-
-    function EmitExpression(expression){
-        if(expression.type == 'Varname'){
-            wasm.push(Opcode.get_local, GetVar(expression.value).id);
-        }
-        else if(expression.type == 'Int'){
-            wasm.push(Opcode.i32_const, ...signedLEB128(expression.value));
-        }
-        else if(expression.type == 'Float'){
-            wasm.push(Opcode.f32_const, ...ieee754(expression.value));
-        }
-        else if(expression.type == '+'){
-            EmitArithmenticOperator(expression, {int:Opcode.i32_add, float:Opcode.f32_add});
-        }
-        else if(expression.type == '*'){
-            EmitArithmenticOperator(expression, {int:Opcode.i32_mul, float:Opcode.f32_mul});
-        }
-        else if(expression.type == '/'){
-            EmitArithmenticOperator(expression, {int:Opcode.i32_div, float:Opcode.f32_div});
-        }
-        else if(expression.type == '-'){
-            EmitArithmenticOperator(expression, {int:Opcode.i32_sub, float:Opcode.f32_sub});
-        }
-        else if(expression.type == '<'){
-            EmitOperatorNumbersInBoolOut(expression, Opcode.i32_lt);
-        }
-        else if(expression.type == '>'){
-            EmitOperatorNumbersInBoolOut(expression, Opcode.i32_gt);
-        }
-        else if(expression.type == 'call'){
-            EmitCall(expression);
-        }
-        else{
-            throw "Unexpected expression: "+JSON.stringify(expression);
-        }
-    }
-
-    function EmitStatement(statement){
-        if(statement.type == '='){
-            EmitExpression(statement.value);
-            wasm.push(Opcode.set_local, GetVar(statement.name).id);
-        }
-        else if(statement.type == 'return'){
-            if(statement.values.length == 1){
-                EmitExpression(statement.values[0]);
-            }
-            wasm.push(Opcode.return);
-        }
-        else if(statement.type == 'if'){
-            EmitExpression(statement.condition);
-            wasm.push(Opcode.if, Blocktype.void);
-            EmitBody(statement.body);
-            wasm.push(Opcode.end);
-        }
-        else if(statement.type == 'loop'){
-            wasm.push(Opcode.block, Blocktype.void);
-            wasm.push(Opcode.loop, Blocktype.void);
-            breakDepth = 0;
-            EmitBody(statement.body);
-            wasm.push(Opcode.br, ...unsignedLEB128(0));
-            wasm.push(Opcode.end);
-            wasm.push(Opcode.end);
-        }
-        else if(statement.type == 'break'){
-            wasm.push(Opcode.br, ...unsignedLEB128(breakDepth));
-        }
-        else if(statement.type == 'call'){
-            EmitCall(statement);
-        }
-        else if(statement.type == 'var'){
-            EmitExpression(statement.value);
-            wasm.push(Opcode.set_local, GetVar(statement.name).id);
-        }
-        else{
-            throw "Unexpected statement: "+JSON.stringify(statement);
-        }
-    }
-
-    function EmitBody(body){
-        breakDepth++;
-        for(var s of body){
-            EmitStatement(s);
-        }
-        breakDepth--;
-    }
-    
-    EmitBody(f.body);
-    return encodeVector([...encodeVector([encodeLocal(i32Count, Valtype.i32)]), ...wasm, Opcode.end])
-}
-        return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(functionFinder, f))));
-    }
-
-    function ImportObject(){
-        var code = "var importObject = {env:{}};\n";
-        code+="var global = {};\n";
-        for(var f of importFunctions){
-            code+="importObject.env."+f.name+"= (";
-            for(var i=0;i<f.parameters.length;i++){
-                code+=f.parameters[i].name;
-                if(i<f.parameters.length-1)
-                    code+=',';
-            }
-            code+=")=>{"
-            code+=f.javascript;
-            code+="};\n";
-        }
-        code+="return importObject;\n";
-        return new Function('exports', code)(exports);
-    }
-
-    const wasm = Uint8Array.from([
-        ...magicModuleHeader,
-        ...moduleVersion,
-        ...EmitTypeSection(),
-        ...EmitImportSection(),
-        ...EmitFuncSection(),
-        ...EmitExportSection(),
-        ...EmitCodeSection(),
-    ]);
-
-    var exports = {};
-    var importObject = ImportObject();
-    importObject.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
-    WebAssembly.instantiate(wasm, importObject).then(
-        (obj) => {
-            for(var f of exportFunctions){
-                exports[f.name] = obj.instance.exports[f.name];
-            }
-            console.log(exports[main]());
-        }
-    );
+    var javascript = EmitJavascript(tree);
+    console.log(javascript);
+    console.log(new Function(javascript)());
 }
 
 function CreateUI(){

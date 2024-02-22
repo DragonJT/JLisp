@@ -2,8 +2,7 @@
 
 function CompileAndRun(main, code){
 //#Parse.js
-//#WasmEmitter.js
-    var errors = [];
+//#EmitJavascript.js
 
     var expression = new Or();
 
@@ -21,7 +20,7 @@ function CompileAndRun(main, code){
 
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Int(), new Float(), new String(), add, mul, div, sub, lt, gt, call]);
+    expression.Init([new Varname(), new Number(), new String(), add, mul, div, sub, lt, gt, call]);
 
     var body = new Or();
 
@@ -40,156 +39,27 @@ function CompileAndRun(main, code){
         ['name', new Varname()],
         ['value', expression]]);
 
-    body.Init([_return, assign, _if, _var, loop, _break, call]);
-
-    var parameters = new ArrayMultipleOf2(['type', new Varname()], ['name', new Varname()]);
+    var parameters = new Obj('type', [],new Params('values', new Varname()));
 
     var fn = new Obj('fn', [
-        ['returnType', new Varname()],
+        new Literal('fn'),
         ['name', new Varname()], 
         ['parameters', parameters]
         ], 
         new Params('body', body));
 
-    var exportFn = new Obj('exportFn', [
-        new Literal('export'),
-        ['returnType', new Varname()],
-        ['name', new Varname()], 
-        ['parameters', parameters]
-        ], 
-        new Params('body', body));
+    body.Init([fn, _return, assign, _if, _var, loop, _break, call]);
 
-    var importFn = new Obj('importFn', [
-        new Literal('import'),
-        ['returnType', new Varname()],
-        ['name', new Varname()], 
-        ['parameters', parameters],
-        ['javascript', new String()]
-        ]);
-
-    var base = new Obj('base', [], new Params('values', new Or([importFn, exportFn, fn])));
+    var base = new Obj('base', [], new Params('values', body));
 
     var lispTree = LispParser(code);
     if(!base.Check(lispTree)){
-        throw "Cannot begin parse";
+        throw "Parser failed at start";
     }
     var tree = base.Parse(lispTree);
-
-    if(errors.length>0){
-        for(var e of errors){
-            console.log(e);
-        }
-        throw "Parsing errors";
-    }
-
-    var importFunctions = tree.values.filter(v=>v.type == 'importFn');
-    var nonExportFunctions = tree.values.filter(v=>v.type == 'fn');
-    var exportFunctions = tree.values.filter(v=>v.type == 'exportFn');
-    var functions = [...nonExportFunctions, ...exportFunctions];
-    var allFunctions = [...importFunctions, ...functions];
-    var functionFinder = {};
-
-    for(var i=0;i<allFunctions.length;i++){
-        var f = allFunctions[i];
-        functionFinder[f.name] = f;
-        f.id = i;
-    }
-
-    function EmitTypeSection(){
-        function GetValtype(typeName){
-            switch(typeName){
-                case 'float': return Valtype.f32;
-                case 'int': return Valtype.i32;
-                default: throw "Unexpected valtype: "+typeName;
-            }
-        }
-    
-        function GetReturnArray(returnType){
-            if(returnType == 'void')
-                return [];
-            else{
-                return [GetValtype(returnType)];
-            }
-        }
-
-        function EmitTypes(functions){
-            return functions.map(f=>[
-                functionType,
-                ...encodeVector(f.parameters.map(p=>GetValtype(p.type))),
-                ...encodeVector(GetReturnArray(f.returnType)),
-            ]);
-        }
-        return createSection(Section.type, encodeVector(EmitTypes(allFunctions)));
-    }
-
-    function EmitImportSection(){
-        function EmitImportFunctions(){
-            return importFunctions.map((f,i)=>[
-                ...encodeString("env"),
-                ...encodeString(f.name),
-                ExportType.func,
-                ...unsignedLEB128(i)
-            ]);
-        }
-
-        return createSection(Section.import, encodeVector([...EmitImportFunctions(), memoryImport]));
-    }
-    
-    function EmitFuncSection(){
-        return createSection(Section.func, encodeVector(functions.map(f=>unsignedLEB128(f.id))));
-    }
-
-    function EmitExportSection(){
-       return createSection(
-            Section.export,
-            encodeVector(exportFunctions.map(f=>[...encodeString(f.name), ExportType.func, ...unsignedLEB128(f.id)])),
-        );
-    }
-
-    function EmitCodeSection(){
-//#EmitFunction.js
-        return createSection(Section.code, encodeVector(functions.map(f=>EmitFunction(functionFinder, f))));
-    }
-
-    function ImportObject(){
-        var code = "var importObject = {env:{}};\n";
-        code+="var global = {};\n";
-        for(var f of importFunctions){
-            code+="importObject.env."+f.name+"= (";
-            for(var i=0;i<f.parameters.length;i++){
-                code+=f.parameters[i].name;
-                if(i<f.parameters.length-1)
-                    code+=',';
-            }
-            code+=")=>{"
-            code+=f.javascript;
-            code+="};\n";
-        }
-        code+="return importObject;\n";
-        return new Function('exports', code)(exports);
-    }
-
-    const wasm = Uint8Array.from([
-        ...magicModuleHeader,
-        ...moduleVersion,
-        ...EmitTypeSection(),
-        ...EmitImportSection(),
-        ...EmitFuncSection(),
-        ...EmitExportSection(),
-        ...EmitCodeSection(),
-    ]);
-
-    var exports = {};
-    var importObject = ImportObject();
-    importObject.env.memory = new WebAssembly.Memory({ initial: 10, maximum: 10 });
-    WebAssembly.instantiate(wasm, importObject).then(
-        (obj) => {
-            for(var f of exportFunctions){
-                exports[f.name] = obj.instance.exports[f.name];
-            }
-            console.log(exports[main]());
-        }
-    );
+    var javascript = EmitJavascript(tree);
+    console.log(javascript);
+    console.log(new Function(javascript)());
 }
 
 function CreateUI(){
