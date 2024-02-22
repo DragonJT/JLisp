@@ -7,14 +7,11 @@
 <body>
   <script>
   var lispProgram = `
-(fn Main ()
-    (var x (+ 10 5))
-    (var y (- 8 2 3))  
-    (console.log (+ "hello world" y)) 
-    (return (* x y))
+(fn LispParser ()
+    (return (obj name "test" value 2))
 )
 
-(return (Main))`;
+(return (LispParser))`;
   
 
 function CompileAndRun(main, code){
@@ -161,6 +158,43 @@ class Or{
     }
 }
 
+class ObjectMultipleOf2{
+    constructor(type, item1, item2){
+        this.IsArrayMultipleOf2 = true;
+        this.Init(type, item1, item2);
+    }
+
+    Init(type, item1, item2){
+        this.type = type;
+        this.item1 = item1;
+        this.item2 = item2;
+    }
+
+    Check(obj){
+        if(obj[0] != 'obj'){
+            return false;
+        }
+        if(obj.length < 2){
+            return false;
+        }
+        if((obj.length-2)%2 != 0){
+            return false;
+        }
+        return obj[1][0] == 'varname' && obj[1][1] == this.type;
+    }
+
+    Parse(obj){
+        var values = [];
+        for(var i=2;i<obj.length;i+=2){
+            var resultObj = {};
+            resultObj[this.item1[0]] = this.item1[1].Parse(obj[i]);
+            resultObj[this.item2[0]] = this.item2[1].Parse(obj[i+1]);
+            values.push(resultObj);
+        }
+        return {type:this.type, values};
+    }
+}
+
 class Params{
     constructor(name, element, min, max){
         this.name = name;
@@ -245,6 +279,10 @@ class Obj{
 
 function EmitJavascript(tree){
 
+    function EmitOperator(expression, op){
+        return '('+EmitExpression(expression.values[0])+op+EmitExpression(expression.values[1])+')';
+    }
+
     function EmitArithmeticOperator(expression, op){
         var result = '('
         for(var i=0;i<expression.values.length;i++){
@@ -267,6 +305,18 @@ function EmitJavascript(tree){
         return result+')';
     }
 
+    function EmitObj(expression){
+        var result = '{';
+        for(var i=0;i<expression.values.length;i++){
+            var field = expression.values[i];
+            result+=field.name+':'+EmitExpression(field.value);
+            if(i<expression.values.length-1){
+                result+=',';
+            }
+        }
+        return result+'}';
+    }
+
     function EmitExpression(expression){
         if(expression.type == 'Number'){
             return expression.value;
@@ -280,6 +330,9 @@ function EmitJavascript(tree){
         else if(expression.type == 'call'){
             return EmitCall(expression);
         }
+        else if(expression.type == 'obj'){
+            return EmitObj(expression);
+        }
         else if(expression.type == '+'){
             return EmitArithmeticOperator(expression, '+');
         }
@@ -291,6 +344,12 @@ function EmitJavascript(tree){
         }
         else if(expression.type == '/'){
             return EmitArithmeticOperator(expression, '/');
+        }
+        else if(expression.type == '<'){
+            return EmitOperator(expression, '<');
+        }
+        else if(expression.type == '>'){
+            return EmitOperator(expression, '>');
         }
         else{
             throw 'Unexpected expression: '+JSON.stringify(expression);
@@ -326,6 +385,9 @@ function EmitJavascript(tree){
         else if(statement.type == 'call'){
             return EmitCall(statement)+';\n';
         }
+        else if(statement.type == 'if'){
+            return 'if('+EmitExpression(statement.condition)+'){\n'+EmitBody(statement.body)+'}\n';
+        }
         else{
             throw 'Unexpected statement: '+JSON.stringify(statement);
         }
@@ -352,13 +414,15 @@ function EmitJavascript(tree){
 
     var sub = new Obj('-', [new Literal('-')], new Params('values', expression, 2));
 
-    var lt = new Obj('<', [new Literal('<')], new Params('values', expression, 2));
+    var lt = new Obj('<', [new Literal('<')], new Params('values', expression, 2, 2));
 
-    var gt = new Obj('>', [new Literal('>')], new Params('values', expression, 2));
+    var gt = new Obj('>', [new Literal('>')], new Params('values', expression, 2, 2));
 
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Number(), new String(), add, mul, div, sub, lt, gt, call]);
+    var obj = new ObjectMultipleOf2('obj', ['name', new Varname()], ['value', expression]);
+
+    expression.Init([new Varname(), new Number(), new String(), obj, add, mul, div, sub, lt, gt, call]);
 
     var body = new Or();
 

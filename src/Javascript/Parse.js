@@ -141,6 +141,43 @@ class Or{
     }
 }
 
+class ObjectMultipleOf2{
+    constructor(type, item1, item2){
+        this.IsArrayMultipleOf2 = true;
+        this.Init(type, item1, item2);
+    }
+
+    Init(type, item1, item2){
+        this.type = type;
+        this.item1 = item1;
+        this.item2 = item2;
+    }
+
+    Check(obj){
+        if(obj[0] != 'obj'){
+            return false;
+        }
+        if(obj.length < 2){
+            return false;
+        }
+        if((obj.length-2)%2 != 0){
+            return false;
+        }
+        return obj[1][0] == 'varname' && obj[1][1] == this.type;
+    }
+
+    Parse(obj){
+        var values = [];
+        for(var i=2;i<obj.length;i+=2){
+            var resultObj = {};
+            resultObj[this.item1[0]] = this.item1[1].Parse(obj[i]);
+            resultObj[this.item2[0]] = this.item2[1].Parse(obj[i+1]);
+            values.push(resultObj);
+        }
+        return {type:this.type, values};
+    }
+}
+
 class Params{
     constructor(name, element, min, max){
         this.name = name;

@@ -1,5 +1,9 @@
 function EmitJavascript(tree){
 
+    function EmitOperator(expression, op){
+        return '('+EmitExpression(expression.values[0])+op+EmitExpression(expression.values[1])+')';
+    }
+
     function EmitArithmeticOperator(expression, op){
         var result = '('
         for(var i=0;i<expression.values.length;i++){
@@ -22,6 +26,18 @@ function EmitJavascript(tree){
         return result+')';
     }
 
+    function EmitObj(expression){
+        var result = '{';
+        for(var i=0;i<expression.values.length;i++){
+            var field = expression.values[i];
+            result+=field.name+':'+EmitExpression(field.value);
+            if(i<expression.values.length-1){
+                result+=',';
+            }
+        }
+        return result+'}';
+    }
+
     function EmitExpression(expression){
         if(expression.type == 'Number'){
             return expression.value;
@@ -35,6 +51,9 @@ function EmitJavascript(tree){
         else if(expression.type == 'call'){
             return EmitCall(expression);
         }
+        else if(expression.type == 'obj'){
+            return EmitObj(expression);
+        }
         else if(expression.type == '+'){
             return EmitArithmeticOperator(expression, '+');
         }
@@ -46,6 +65,12 @@ function EmitJavascript(tree){
         }
         else if(expression.type == '/'){
             return EmitArithmeticOperator(expression, '/');
+        }
+        else if(expression.type == '<'){
+            return EmitOperator(expression, '<');
+        }
+        else if(expression.type == '>'){
+            return EmitOperator(expression, '>');
         }
         else{
             throw 'Unexpected expression: '+JSON.stringify(expression);
@@ -80,6 +105,9 @@ function EmitJavascript(tree){
         }
         else if(statement.type == 'call'){
             return EmitCall(statement)+';\n';
+        }
+        else if(statement.type == 'if'){
+            return 'if('+EmitExpression(statement.condition)+'){\n'+EmitBody(statement.body)+'}\n';
         }
         else{
             throw 'Unexpected statement: '+JSON.stringify(statement);

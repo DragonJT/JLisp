@@ -14,13 +14,15 @@ function CompileAndRun(main, code){
 
     var sub = new Obj('-', [new Literal('-')], new Params('values', expression, 2));
 
-    var lt = new Obj('<', [new Literal('<')], new Params('values', expression, 2));
+    var lt = new Obj('<', [new Literal('<')], new Params('values', expression, 2, 2));
 
-    var gt = new Obj('>', [new Literal('>')], new Params('values', expression, 2));
+    var gt = new Obj('>', [new Literal('>')], new Params('values', expression, 2, 2));
 
     var call = new Obj('call', [['name', new Varname()]], new Params('args', expression));
 
-    expression.Init([new Varname(), new Number(), new String(), add, mul, div, sub, lt, gt, call]);
+    var obj = new ObjectMultipleOf2('obj', ['name', new Varname()], ['value', expression]);
+
+    expression.Init([new Varname(), new Number(), new String(), obj, add, mul, div, sub, lt, gt, call]);
 
     var body = new Or();
 

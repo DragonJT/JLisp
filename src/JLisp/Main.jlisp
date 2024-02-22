@@ -1,9 +1,6 @@
 
-(fn Main ()
-    (var x (+ 10 5))
-    (var y (- 8 2 3))  
-    (console.log (+ "hello world" y)) 
-    (return (* x y))
+(fn LispParser ()
+    (return (obj name "test" value 2))
 )
 
-(return (Main))
+(return (LispParser))
